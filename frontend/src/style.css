@@ -708,6 +708,71 @@ textarea { width: 100%; resize: vertical; }
   overflow-y: auto;
 }
 
+.qr-modal.modal-card {
+  max-width: 420px;
+}
+
+.pairing-box {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+
+.pairing-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+  font-size: 15px;
+  text-align: center;
+}
+
+.pairing-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.pairing-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pairing-form input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated, var(--bg));
+  color: inherit;
+  font-size: 15px;
+}
+
+.pairing-form .btn {
+  flex: 0 0 auto;
+}
+
+.pairing-error {
+  color: #e35d6a;
+  font-size: 13px;
+  margin: 10px 0 0;
+}
+
+.pairing-code-wrap {
+  margin-top: 14px;
+  text-align: center;
+}
+
+.pairing-code {
+  margin: 6px 0 0;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-bright, var(--accent));
+}
+
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--border); font-size: 14px; }
 th {

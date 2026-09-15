@@ -34,9 +34,17 @@ export default function Guide() {
           <ol>
             <li>Sur le site, clique sur <strong>Créer un bot</strong>.</li>
             <li>Un grand code (carré noir et blanc) apparaît.</li>
-            <li>Sur ton téléphone, ouvre <strong>WhatsApp</strong>.</li>
-            <li>Va dans <strong>Paramètres</strong> → <strong>Appareils liés</strong> → <strong>Lier un appareil</strong>.</li>
-            <li>Scanne le code avec ton téléphone.</li>
+            <li>
+              <strong>Option A — scanner le QR</strong> (idéal si tu as un PC ou un 2ᵉ téléphone) :
+              WhatsApp → <strong>Paramètres</strong> → <strong>Appareils liés</strong> → <strong>Lier un appareil</strong> → scanne.
+            </li>
+            <li>
+              <strong>Option B — code par numéro</strong> (idéal avec un seul téléphone) :
+              sous le QR, entre ton numéro avec l’indicatif (ex. <code>24165255707</code>),
+              clique sur <strong>Obtenir le code</strong>, puis sur ton téléphone :
+              Appareils liés → Lier un appareil → <strong>Connecter avec un numéro de téléphone</strong>
+              et tape le code affiché (ex. <code>ABCD-EFGH</code>).
+            </li>
           </ol>
           <p>
             Quand c’est bon, ton bot affiche <span className="badge connected">connected</span>.

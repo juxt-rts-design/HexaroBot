@@ -7,6 +7,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   downloadContentFromMessage,
+  Browsers,
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const pino = require('pino');
@@ -110,10 +111,30 @@ const SESSIONS_DIR = path.join(__dirname, '..', '..', 'sessions-baileys');
 const activeSockets = new Map(); // botId -> socket
 const lastQr = new Map();
 const lastStatus = new Map();
+const lastPairing = new Map(); // botId -> { code, raw, phone }
+const pairingInFlight = new Map(); // botId -> Promise
 const reconnectAttempts = new Map(); // botId -> nombre de tentatives depuis la dernière connexion réussie
 const heartbeatIntervals = new Map(); // botId -> IntervalID
 const HEARTBEAT_MS = 60 * 60 * 1000; // 1h
 let ioRef = null;
+
+/** Même logique que Juxt : chiffres seuls + indicatif pays (ex. 24165255707). */
+function normalizePairingPhone(raw) {
+  if (!raw) return '';
+  let digits = String(raw).replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.startsWith('2410') && digits.length >= 11) {
+    digits = `241${digits.slice(4)}`;
+  }
+  const trunkDrop = digits.match(/^(33|32|34|39|44|49|237|225|221|226)0(\d{8,})$/);
+  if (trunkDrop) digits = trunkDrop[1] + trunkDrop[2];
+  return digits;
+}
+
+function formatPairingCode(code) {
+  const raw = String(code || '').replace(/\s+/g, '');
+  return raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw;
+}
 
 function init(io) {
   ioRef = io;
@@ -129,7 +150,57 @@ function emit(botId, event, payload) {
 
 function sendSnapshot(socket, botId) {
   if (lastQr.has(botId)) socket.emit('qr', { qr: lastQr.get(botId) });
+  if (lastPairing.has(botId)) socket.emit('pairing-code', lastPairing.get(botId));
   if (lastStatus.has(botId)) socket.emit('status', lastStatus.get(botId));
+}
+
+/**
+ * Demande un code d’auth WhatsApp (8 chiffres) pour lier sans scanner le QR.
+ * À appeler quand le bot est en qr_pending — même flux que Juxt requestPairingCode.
+ */
+async function requestPairingCode(botId, phoneRaw) {
+  const phone = normalizePairingPhone(phoneRaw);
+  if (!phone || phone.length < 8 || phone.length > 15) {
+    const err = new Error('Numéro invalide. Mets l’indicatif pays, ex. 24165255707');
+    err.status = 400;
+    throw err;
+  }
+
+  const sock = activeSockets.get(botId);
+  if (!sock) {
+    const err = new Error('Bot pas encore prêt. Attends que le QR s’affiche, puis réessaie.');
+    err.status = 409;
+    throw err;
+  }
+  if (sock.authState?.creds?.registered) {
+    const err = new Error('Ce bot est déjà lié à WhatsApp.');
+    err.status = 409;
+    throw err;
+  }
+
+  if (pairingInFlight.has(botId)) return pairingInFlight.get(botId);
+
+  const job = (async () => {
+    // Petit délai comme Juxt : laisse le canal auth se stabiliser après le QR.
+    await new Promise((r) => setTimeout(r, 1500));
+    if (activeSockets.get(botId) !== sock) {
+      const err = new Error('Connexion interrompue. Rouvre la fenêtre et réessaie.');
+      err.status = 409;
+      throw err;
+    }
+    const code = await sock.requestPairingCode(phone);
+    const payload = {
+      code: formatPairingCode(code),
+      raw: String(code || '').replace(/\s+/g, ''),
+      phone,
+    };
+    lastPairing.set(botId, payload);
+    emit(botId, 'pairing-code', payload);
+    return payload;
+  })().finally(() => pairingInFlight.delete(botId));
+
+  pairingInFlight.set(botId, job);
+  return job;
 }
 
 const {
@@ -257,6 +328,8 @@ async function startBot({ botId, sessionKey, force = false }) {
   if (force) {
     await killSocket(botId);
     lastQr.delete(botId);
+    lastPairing.delete(botId);
+    pairingInFlight.delete(botId);
   } else if (activeSockets.has(botId)) {
     return activeSockets.get(botId);
   }
@@ -268,11 +341,13 @@ async function startBot({ botId, sessionKey, force = false }) {
   // ferme la connexion juste après le scan du QR au lieu de finaliser le pairing.
   const { version } = await fetchLatestBaileysVersion();
 
+  // Browsers.ubuntu('Chrome') : recommandé Baileys pour le code d’auth (comme Juxt).
   const sock = makeWASocket({
     auth: state,
     version,
     logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
+    browser: Browsers.ubuntu('Chrome'),
     syncFullHistory: true,
     markOnlineOnConnect: true,
     shouldSyncHistoryMessage: () => true,
@@ -293,6 +368,8 @@ async function startBot({ botId, sessionKey, force = false }) {
 
     if (connection === 'open') {
       lastQr.delete(botId);
+      lastPairing.delete(botId);
+      pairingInFlight.delete(botId);
       reconnectAttempts.delete(botId);
       const phone = sock.user?.id?.split(':')[0] || sock.user?.id?.split('@')[0] || null;
       await setStatus(botId, 'connected', { phone_number: phone });
@@ -342,6 +419,8 @@ async function startBot({ botId, sessionKey, force = false }) {
       }
 
       lastQr.delete(botId);
+      lastPairing.delete(botId);
+      pairingInFlight.delete(botId);
       await setStatus(botId, 'disconnected', isLoggedOut ? { phone_number: null } : {});
     }
   });
@@ -592,6 +671,8 @@ async function disconnectBot(botId, sessionKey) {
     await killSocket(botId);
   }
   lastQr.delete(botId);
+  lastPairing.delete(botId);
+  pairingInFlight.delete(botId);
   reconnectAttempts.delete(botId);
   clearBotCache(botId);
   clearStatusCache(botId);
@@ -1010,4 +1091,5 @@ module.exports = {
   enrichChats,
   listChatPictures,
   listContactStatuses,
+  requestPairingCode,
 };

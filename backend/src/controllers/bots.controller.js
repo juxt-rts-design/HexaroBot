@@ -191,3 +191,24 @@ exports.reconnect = async (req, res) => {
     .catch((err) => console.error(`Échec reconnexion bot ${bot.id}:`, err.message));
   res.json({ ok: true });
 };
+
+exports.requestPairingCode = async (req, res) => {
+  const { data: bot, error } = await supabase
+    .from('bots')
+    .select('*')
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!bot) return res.status(404).json({ error: 'Bot introuvable.' });
+  if (bot.plan_code !== 'vue_unique') {
+    return res.status(400).json({ error: 'Le code par numéro est disponible pour HexaroBot uniquement.' });
+  }
+  try {
+    const result = await baileysManager.requestPairingCode(bot.id, req.body?.phone);
+    res.json(result);
+  } catch (err) {
+    console.error(`pairing-code bot ${bot.id}:`, err.message);
+    res.status(err.status || 500).json({ error: err.message || 'Impossible d’obtenir le code.' });
+  }
+};
