@@ -69,7 +69,7 @@ export default function QrModal({ botId, onClose, onConnected }) {
           <>
             {qr ? (
               <>
-                <img src={qr} alt="QR code WhatsApp" style={{ width: '100%', borderRadius: 12, background: '#fff', padding: 12 }} />
+                <img className="qr-image" src={qr} alt="QR code WhatsApp" />
                 <p className="muted">
                   WhatsApp → Appareils liés → Lier un appareil, puis scanne ce code.
                 </p>
