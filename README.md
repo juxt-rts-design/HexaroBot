@@ -69,3 +69,4 @@ L'API doit être servie sur le **même domaine** que le site (`/api`, `/socket.i
 - "Répondre à votre place quand vous n'êtes pas en ligne" ne détecte pas réellement le statut en ligne : c'est un auto-répondeur actif en continu.
 - La vue unique ne peut pas être capturée automatiquement (restriction WhatsApp, voir `DOCUMENTATION.md` §5) : le propriétaire doit répondre au message cité avec le mot-clé configuré après l'avoir ouvert normalement.
 - Chaque média de conversation (image/vidéo/audio) est stocké sur le serveur sans purge automatique — à surveiller si le volume grossit.
+# HexaroBot
