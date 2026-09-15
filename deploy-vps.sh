@@ -2,7 +2,9 @@
 # Déploiement HEXARO sur VPS — clés déjà remplies depuis ton .env local
 set -euo pipefail
 
-cd ~/chabot   # adapte le chemin si besoin
+# Se place dans le dossier du script (ex. ~/HexaroBot), pas un chemin fixe
+cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")")"
+echo "→ Déploiement depuis : $(pwd)"
 
 # 1) deps
 npm run install:all
