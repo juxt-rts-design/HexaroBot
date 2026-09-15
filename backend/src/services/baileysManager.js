@@ -114,8 +114,6 @@ const lastStatus = new Map();
 const lastPairing = new Map(); // botId -> { code, raw, phone }
 const pairingInFlight = new Map(); // botId -> Promise
 const reconnectAttempts = new Map(); // botId -> nombre de tentatives depuis la dernière connexion réussie
-const heartbeatIntervals = new Map(); // botId -> IntervalID
-const HEARTBEAT_MS = 60 * 60 * 1000; // 1h
 let ioRef = null;
 
 /** Même logique que Juxt : chiffres seuls + indicatif pays (ex. 24165255707). */
@@ -301,16 +299,7 @@ async function setStatus(botId, status, extra = {}) {
   emit(botId, 'status', payload);
 }
 
-function stopHeartbeat(botId) {
-  const interval = heartbeatIntervals.get(botId);
-  if (interval) {
-    clearInterval(interval);
-    heartbeatIntervals.delete(botId);
-  }
-}
-
 async function killSocket(botId) {
-  stopHeartbeat(botId);
   const sock = activeSockets.get(botId);
   if (!sock) return;
   activeSockets.delete(botId);
@@ -373,25 +362,10 @@ async function startBot({ botId, sessionKey, force = false }) {
       reconnectAttempts.delete(botId);
       const phone = sock.user?.id?.split(':')[0] || sock.user?.id?.split('@')[0] || null;
       await setStatus(botId, 'connected', { phone_number: phone });
-
-      const siteUrl = process.env.FRONTEND_URL || '';
-      stopHeartbeat(botId);
-      sendToSelf(botId, `✅ Bot connecté avec succès !\n${siteUrl}`).catch((err) =>
-        console.error(`Échec notification connexion bot ${botId}:`, err.message)
-      );
-      heartbeatIntervals.set(
-        botId,
-        setInterval(() => {
-          sendToSelf(botId, `✅ Toujours connecté.\n${siteUrl}`).catch((err) =>
-            console.error(`Échec notification horaire bot ${botId}:`, err.message)
-          );
-        }, HEARTBEAT_MS)
-      );
     }
 
     if (connection === 'close') {
       activeSockets.delete(botId);
-      stopHeartbeat(botId);
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.error(
         `[baileys bot ${botId}] connexion fermée, statusCode=${statusCode}, message=${lastDisconnect?.error?.message}`
