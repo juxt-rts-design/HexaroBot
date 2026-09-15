@@ -1,0 +1,8 @@
+# Aquila Bot — config Supabase locale minimale
+project_id = "kiggmajeihmdkzdhjrwb"
+
+[api]
+enabled = true
+
+[db]
+major_version = 17

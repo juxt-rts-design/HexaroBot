@@ -1,0 +1,26 @@
+{
+  "name": "hexaro-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5011 --host",
+    "build": "vite build",
+    "preview": "vite preview --port 5011 --host",
+    "start": "serve -s dist -l 5011"
+  },
+  "dependencies": {
+    "@react-oauth/google": "^0.12.1",
+    "@supabase/supabase-js": "^2.116.0",
+    "axios": "^1.7.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "serve": "^14.2.4",
+    "vite": "^5.4.11"
+  }
+}

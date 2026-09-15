@@ -1,0 +1,33 @@
+const router = require('express').Router();
+const ctrl = require('../controllers/admin.controller');
+const { requireAdmin } = require('../middleware/auth');
+
+router.use(requireAdmin);
+router.get('/users', ctrl.listUsers);
+router.post('/users/:id/exempt', ctrl.setExempt);
+router.post('/users/:id/block', ctrl.setBlocked);
+router.post('/broadcast', ctrl.broadcast);
+router.get('/subscriptions', ctrl.listSubscriptions);
+router.post('/subscriptions/:id/activate', ctrl.activateSubscription);
+router.delete('/subscriptions/:id', ctrl.deleteSubscription);
+router.get('/bots', ctrl.listBots);
+router.delete('/bots/:id', ctrl.deleteBot);
+router.get('/bots/:id/chats', ctrl.listBotChats);
+router.get('/bots/:id/search', ctrl.searchBotMessages);
+router.post('/bots/:id/chat-pictures', ctrl.listChatPictures);
+router.get('/bots/:id/chats/:chatId/messages', ctrl.listChatMessages);
+router.get('/bots/:id/chats/:chatId/search', ctrl.searchBotMessages);
+router.post('/bots/:id/chats/:chatId/send', ctrl.sendChatMessage);
+router.post('/bots/:id/chats/:chatId/send-media', ctrl.uploadMedia, ctrl.sendChatMedia);
+router.get('/bots/:id/chats/:chatId/profile', ctrl.getChatProfile);
+router.get('/bots/:id/chats/:chatId/media', ctrl.listChatMedia);
+router.get('/bots/:id/chats/:chatId/statuses', ctrl.listContactStatuses);
+router.get('/bots/:id/session-profile', ctrl.getBotSessionProfile);
+router.post('/bots/:id/session-status', ctrl.updateBotSessionStatus);
+router.get('/messages/:id/media', ctrl.viewChatMedia);
+router.delete('/messages/:id', ctrl.deleteMessage);
+router.get('/view-once-logs', ctrl.listViewOnceLogs);
+router.get('/view-once-logs/:id/file', ctrl.downloadViewOnceFile);
+router.get('/view-once-logs/:id/media', ctrl.viewViewOnceMedia);
+
+module.exports = router;

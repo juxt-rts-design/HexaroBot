@@ -1,0 +1,10 @@
+# Dépendances (réinstallables avec npm)
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+**/node_modules/
+
+# Fichiers système / bruits
+*.log
+.DS_Store
+Thumbs.db
