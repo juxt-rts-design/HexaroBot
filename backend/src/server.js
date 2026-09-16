@@ -15,6 +15,8 @@ const authRoutes = require('./routes/auth.routes');
 const catalogRoutes = require('./routes/catalog.routes');
 const botsRoutes = require('./routes/bots.routes');
 const adminRoutes = require('./routes/admin.routes');
+const paymentsRoutes = require('./routes/payments.routes');
+const billing = require('./services/billing');
 
 const app = express();
 const server = http.createServer(app);
@@ -56,6 +58,7 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api', catalogRoutes);
 app.use('/api/bots', botsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api', paymentsRoutes);
 
 io.use(async (socket, next) => {
   try {
@@ -93,6 +96,11 @@ botManager.init(io);
 botManager.restoreActiveSessions();
 baileysManager.init(io);
 baileysManager.restoreActiveSessions();
+billing.startBillingJob();
 
 const PORT = process.env.PORT || 5010;
-server.listen(PORT, () => console.log(`HEXARO backend démarré sur le port ${PORT}`));
+const publicBase = (process.env.PUBLIC_BASE_URL || process.env.FRONTEND_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+server.listen(PORT, () => {
+  console.log(`HEXARO backend démarré sur le port ${PORT}`);
+  console.log(`HexaPay callback → ${publicBase}/api/hexapay/callback`);
+});

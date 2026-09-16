@@ -12,6 +12,7 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminChat = lazy(() => import('./pages/AdminChat'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 const Guide = lazy(() => import('./pages/Guide'));
+const Payment = lazy(() => import('./pages/Payment'));
 
 function PageLoader() {
   return (
@@ -69,6 +70,14 @@ export default function App() {
             element={
               <PrivateRoute>
                 <Guide />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/paiement"
+            element={
+              <PrivateRoute>
+                <Payment />
               </PrivateRoute>
             }
           />

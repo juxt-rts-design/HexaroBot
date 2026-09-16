@@ -30,6 +30,20 @@ export default function Guide() {
         </section>
 
         <section className="card">
+          <h2>Essai &amp; paiement</h2>
+          <ul>
+            <li><strong>3 jours d’essai</strong> dès la création du bot.</li>
+            <li>Ensuite : <strong>2 100 FCFA / mois</strong> (montant fixe).</li>
+            <li>Paiement via <strong>Airtel Money</strong> ou <strong>MoBiCash</strong> : bouton <Link to="/dashboard?pay=1">Abonnement</Link> sur le dashboard.</li>
+            <li>
+              Si tu ne paies pas à temps, le bot est <strong>mis en pause</strong> (pas supprimé).
+              Après paiement, il repart. Tu vois le temps d’essai restant dans la fenêtre Abonnement.
+            </li>
+            <li>Tu reçois un message WhatsApp privé quand il reste <strong>moins de 24 h</strong>, avec le lien de paiement. Sans paiement, le bot se met en pause tout seul.</li>
+          </ul>
+        </section>
+
+        <section className="card">
           <h2>1. Brancher ton bot (une seule fois)</h2>
           <ol>
             <li>Sur le site, clique sur <strong>Créer un bot</strong>.</li>
@@ -150,16 +164,11 @@ export default function Guide() {
 
         <section className="card">
           <h2>En résumé</h2>
-          <p>Une fois ton bot connecté, il t’aide à :</p>
-          <ul>
-            <li>garder les vues uniques (sans les ouvrir),</li>
-            <li>récupérer ce qu’on a effacé,</li>
-            <li>voir une photo de profil,</li>
-            <li>télécharger des vidéos depuis un lien,</li>
-            <li>faire des stickers,</li>
-            <li>recevoir un statut en privé <strong>seulement si tu le likes</strong>.</li>
-          </ul>
-          <p>Tout ça arrive surtout dans <strong>tes messages à toi-même</strong> sur WhatsApp.</p>
+          <p>
+            Une fois ton bot connecté, il t’aide à garder les vues uniques, récupérer les messages
+            effacés, voir un profil, télécharger des vidéos, faire des stickers et récupérer un statut
+            (like / réponse). Essai 3 jours, puis 2 100 FCFA/mois.
+          </p>
         </section>
 
         <section className="card">

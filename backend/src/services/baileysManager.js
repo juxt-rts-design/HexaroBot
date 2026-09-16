@@ -654,6 +654,15 @@ async function disconnectBot(botId, sessionKey) {
   await setStatus(botId, 'disconnected', { phone_number: null });
 }
 
+/** Coupe le socket sans logout WhatsApp ni wipe session (abonnement expiré). */
+async function pauseBot(botId) {
+  await killSocket(botId);
+  lastQr.delete(botId);
+  lastPairing.delete(botId);
+  pairingInFlight.delete(botId);
+  reconnectAttempts.delete(botId);
+}
+
 async function restoreActiveSessions() {
   const { data: rows, error } = await supabase
     .from('bots')
@@ -1052,6 +1061,7 @@ module.exports = {
   init,
   startBot,
   disconnectBot,
+  pauseBot,
   restoreActiveSessions,
   room,
   sendSnapshot,

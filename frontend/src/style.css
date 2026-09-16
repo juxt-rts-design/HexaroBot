@@ -567,6 +567,10 @@ textarea { width: 100%; resize: vertical; }
 }
 .admin-section-head h2 { margin: 0 0 6px; }
 .admin-section-head .muted { margin: 0; max-width: 42rem; }
+.admin-subhead {
+  margin: 22px 0 10px;
+  font-size: 15px;
+}
 .admin-stat-row {
   display: flex;
   flex-wrap: wrap;
@@ -2249,14 +2253,20 @@ img.wa-avatar,
   .wa-sidebar, .wa-thread { width: 100%; max-width: 100%; }
   .wa-hide-mobile { display: none !important; }
   .wa-back-mobile { display: inline-flex; }
-  .wa-bubble { max-width: 85%; }
-  .wa-profile-panel {
-    position: fixed;
-    inset: 0;
-    width: 100%;
+  .wa-app {
+    height: 100dvh;
+    max-height: 100dvh;
   }
+  .wa-thread-header {
+    min-height: 56px;
+    padding: 6px 8px;
+    padding-top: max(6px, env(safe-area-inset-top, 0px));
+  }
+  .wa-thread-identity { padding: 2px 4px; gap: 8px; }
+  .wa-thread-identity .wa-avatar { width: 36px; height: 36px; min-width: 36px; }
   .wa-messages {
-    padding: 12px 4%;
+    padding: 10px 10px 14px;
+    -webkit-overflow-scrolling: touch;
     background-image:
       linear-gradient(rgba(11, 20, 26, 0.68), rgba(11, 20, 26, 0.64)),
       url('/chat-wallpaper-portrait.jpg');
@@ -2266,6 +2276,34 @@ img.wa-avatar,
   .wa-messages.wa-wallpaper-sm { background-size: 110px auto; }
   .wa-messages.wa-wallpaper-md { background-size: 140px auto; }
   .wa-messages.wa-wallpaper-lg { background-size: 200px auto; }
+  .wa-bubble {
+    max-width: 86%;
+    font-size: 15.5px;
+  }
+  .wa-bubble-text {
+    font-size: 15.5px;
+    line-height: 1.38;
+    overflow-wrap: anywhere;
+  }
+  .wa-bubble:hover .wa-bubble-delete { opacity: 0.85; }
+  .wa-composer {
+    gap: 4px;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .wa-composer input[type="text"] {
+    font-size: 16px;
+    min-height: 42px;
+    padding: 10px 10px;
+  }
+  .wa-icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .wa-profile-panel {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
   .wa-placeholder {
     background: #222e35;
     background-image: none;
@@ -2285,4 +2323,332 @@ img.wa-avatar,
     background: #222e35;
     background-image: none;
   }
+}
+
+/* —— Modale paiement HexaPay —— */
+.pay-overlay {
+  align-items: center;
+}
+
+.pay-modal {
+  width: min(440px, 100%);
+  max-height: min(92vh, 760px);
+  overflow-y: auto;
+  padding: 18px 18px 20px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.pay-modal::-webkit-scrollbar {
+  display: none;
+}
+
+.pay-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.pay-modal-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pay-modal-brand img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #fff;
+  padding: 4px;
+}
+
+.pay-modal-brand h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.pay-modal-brand p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pay-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.pay-close:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pay-status-card {
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+}
+
+.pay-status-card.is-trial {
+  background: rgba(37, 211, 102, 0.08);
+  border-color: rgba(37, 211, 102, 0.28);
+}
+
+.pay-status-card.is-ok {
+  background: rgba(75, 163, 224, 0.08);
+  border-color: rgba(75, 163, 224, 0.28);
+}
+
+.pay-status-card.is-locked {
+  background: rgba(234, 67, 53, 0.08);
+  border-color: rgba(234, 67, 53, 0.32);
+}
+
+.pay-status-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.pay-status-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pay-status-top strong {
+  font-size: 14px;
+}
+
+.pay-progress {
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 10px 0 8px;
+  overflow: hidden;
+}
+
+.pay-progress span {
+  display: block;
+  height: 100%;
+  background: #25d366;
+  border-radius: 99px;
+}
+
+.pay-status-copy {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.pay-amount-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(37, 211, 102, 0.1);
+  margin-bottom: 14px;
+}
+
+.pay-amount-row strong {
+  font-size: 1.45rem;
+}
+
+.pay-amount-row small {
+  font-size: 0.7em;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.pay-secure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pay-error {
+  color: #f07178;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.pay-feedback {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+}
+
+.pay-feedback.ok { border-color: rgba(37, 211, 102, 0.45); }
+.pay-feedback.pending { border-color: rgba(233, 196, 106, 0.4); }
+.pay-feedback strong { display: block; margin-bottom: 4px; }
+.pay-feedback p { margin: 0; color: var(--muted); font-size: 13px; }
+.pay-feedback .btn { margin-left: auto; }
+.pay-ref { margin-top: 6px !important; font-family: ui-monospace, monospace; letter-spacing: 0.04em; }
+
+.pay-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: #25d366;
+  animation: pay-spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes pay-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .pay-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .pay-modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 94vh;
+    border-radius: 18px 18px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .pay-operator img {
+    width: 80px;
+    height: 42px;
+  }
+}
+
+.pay-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.pay-form input[type='tel'] {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated, var(--bg));
+  color: inherit;
+  font-size: 16px;
+  margin-bottom: 16px;
+}
+
+.pay-operators {
+  border: 0;
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+.pay-operators legend {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.pay-operator-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.pay-exempt {
+  margin: 8px 0 0;
+  color: var(--accent-bright, #25d366);
+  font-weight: 600;
+}
+
+.pay-operator {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pay-operator input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pay-operator img {
+  width: 100px;
+  height: 56px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.pay-operator.is-on {
+  border-color: rgba(37, 211, 102, 0.55);
+  box-shadow: 0 0 0 1px rgba(37, 211, 102, 0.25);
+}
+
+.pay-cta {
+  width: 100%;
+  justify-content: center;
+  min-height: 46px;
+}
+
+.badge.suspended {
+  background: rgba(234, 67, 53, 0.18);
+  color: #f07178;
+}
+
+.billing-banner {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(233, 196, 106, 0.4);
+  background: rgba(233, 196, 106, 0.1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.billing-banner.danger {
+  border-color: rgba(234, 67, 53, 0.45);
+  background: rgba(234, 67, 53, 0.1);
+}
+
+.billing-banner p {
+  margin: 0;
+  font-size: 14px;
+  flex: 1 1 200px;
 }

@@ -76,6 +76,44 @@ exports.setExempt = async (req, res) => {
   res.json({ ok: true });
 };
 
+exports.listPayments = async (req, res) => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('id, reference, operator_code, msisdn, amount, currency, status, transaction_id, created_at, updated_at, user_id, profiles(email, name)')
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const rows = data || [];
+  const success = rows.filter((p) => p.status === 'SUCCESS');
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const monthSuccess = success.filter((p) => new Date(p.created_at) >= monthStart);
+
+  const sum = (list) => list.reduce((acc, p) => acc + Number(p.amount || 0), 0);
+
+  const payments = rows.map((p) => ({
+    ...p,
+    user_email: p.profiles?.email,
+    user_name: p.profiles?.name,
+    profiles: undefined,
+  }));
+
+  res.json({
+    payments,
+    stats: {
+      price_xaf: Number(process.env.SUBSCRIPTION_PRICE_XAF || 2100),
+      count_success: success.length,
+      total_success: sum(success),
+      month_success: sum(monthSuccess),
+      month_count: monthSuccess.length,
+      count_pending: rows.filter((p) => p.status === 'PENDING').length,
+      count_failed: rows.filter((p) => p.status === 'FAILED').length,
+    },
+  });
+};
+
 exports.listSubscriptions = async (req, res) => {
   const { data, error } = await supabase
     .from('subscriptions')

@@ -1,0 +1,1 @@
+import{r as t}from"./index-FBvHp1Tu.js";function l(){const[n,a]=t.useState(()=>new Set),r=t.useCallback(async(e,o)=>{a(s=>new Set(s).add(e));try{await o()}finally{a(s=>{const u=new Set(s);return u.delete(e),u})}},[]),c=t.useCallback(e=>n.has(e),[n]);return{run:r,isBusy:c}}export{l as u};

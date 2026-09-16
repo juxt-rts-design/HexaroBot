@@ -27,6 +27,12 @@ WITAI_API_KEY=
 
 DOWNLOADER_API_URL=https://hexaro.92-222-80-91.sslip.io
 SITE_DOWNLOADER_LOCAL_FALLBACK=false
+
+DAREPAY_API_KEY=gw_h3g41u5g0Bcb8FY6zfpTOKqTtTTNLgjqOPEZX2IM
+DAREPAY_BASE_URL=https://darepay.devetu.org/api
+SUBSCRIPTION_PRICE_XAF=2100
+TRIAL_DAYS=3
+PUBLIC_BASE_URL=https://chat.92-222-80-91.sslip.io
 EOF
 
 cat > frontend/.env <<'EOF'
@@ -110,3 +116,7 @@ echo ""
 echo "OK — pense à ajouter dans Supabase Auth → URL Configuration :"
 echo "  Site URL : https://chat.92-222-80-91.sslip.io"
 echo "  Redirect : https://chat.92-222-80-91.sslip.io/auth/callback"
+echo ""
+echo "DarePay — URL de callback à déclarer :"
+echo "  https://chat.92-222-80-91.sslip.io/api/hexapay/callback"
+echo "Applique aussi la migration SQL : supabase/migrations/20260916000000_payments_trial.sql"

@@ -3,6 +3,7 @@ const { supabase } = require('../config/supabase');
 const botManager = require('../services/botManager');
 const baileysManager = require('../services/baileysManager');
 const botSettings = require('../services/botSettings');
+const billing = require('../services/billing');
 
 const EDITABLE_FIELDS = {
   vue_unique: ['command_word', 'reactions_enabled', 'success_emoji', 'error_emoji'],
@@ -15,51 +16,21 @@ function managerFor(planCode) {
 }
 
 exports.listMine = async (req, res) => {
-  const { data: rows, error } = await supabase
-    .from('bots')
-    .select('id, plan_code, label, phone_number, status, created_at, connected_at, subscription_id')
-    .eq('user_id', req.user.id)
-    .order('created_at', { ascending: false });
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ bots: rows || [] });
+  try {
+    const snapshot = await billing.getBillingSnapshot(req.user.id);
+    res.json({
+      bots: snapshot.bots,
+      billing: {
+        price_xaf: snapshot.price_xaf,
+        trial_days: snapshot.trial_days,
+        exempt: snapshot.exempt,
+      },
+    });
+  } catch (err) {
+    console.error('bots.listMine:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 };
-
-async function subscriptionForFreeUser(userId, planCode) {
-  const { data: plan } = await supabase
-    .from('plans')
-    .select('*')
-    .eq('code', planCode)
-    .eq('active', true)
-    .maybeSingle();
-  if (!plan) return null;
-
-  const { data: existing } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('plan_id', plan.id)
-    .eq('status', 'active')
-    .order('id', { ascending: false })
-    .limit(1);
-  if (existing?.length) return { ...existing[0], plan_code: planCode };
-
-  const endsAt = new Date(Date.now() + 100 * 365 * 24 * 3600 * 1000).toISOString();
-  const { data: sub, error } = await supabase
-    .from('subscriptions')
-    .insert({
-      user_id: userId,
-      plan_id: plan.id,
-      period: 'month',
-      amount: 0,
-      status: 'active',
-      starts_at: new Date().toISOString(),
-      ends_at: endsAt,
-    })
-    .select('*')
-    .single();
-  if (error) throw error;
-  return { ...sub, plan_code: planCode };
-}
 
 exports.create = async (req, res) => {
   try {
@@ -76,11 +47,11 @@ exports.create = async (req, res) => {
         if (countErr) return res.status(500).json({ error: countErr.message });
         if ((count || 0) >= 1) {
           return res.status(403).json({
-            error: "Tu as déjà créé ton chatbot gratuit. Contacte l'administrateur pour en avoir plus.",
+            error: "Tu as déjà créé ton HexaroBot. Contacte l'administrateur pour en avoir plus.",
           });
         }
       }
-      sub = await subscriptionForFreeUser(req.user.id, planCode);
+      sub = await billing.ensureSubscriptionForBot(req.user.id, planCode, { exempt: isExempt });
       if (!sub) return res.status(404).json({ error: 'Offre introuvable.' });
     } else {
       const { data: rows } = await supabase
@@ -117,7 +88,12 @@ exports.create = async (req, res) => {
       .startBot({ botId: bot.id, sessionKey, planCode: sub.plan_code })
       .catch((err) => console.error(`Échec démarrage bot ${bot.id}:`, err.message));
 
-    res.status(201).json({ bot });
+    res.status(201).json({
+      bot,
+      trial: sub.is_trial
+        ? { days: billing.trialDays(), ends_at: sub.ends_at }
+        : null,
+    });
   } catch (err) {
     console.error('bots.create:', err.message);
     res.status(500).json({ error: err.message });
@@ -184,8 +160,32 @@ exports.reconnect = async (req, res) => {
     .maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!bot) return res.status(404).json({ error: 'Bot introuvable.' });
+
+  if (bot.status === 'suspended' && !req.user.exempt) {
+    return res.status(402).json({
+      error: `Abonnement expiré. Paye ${billing.priceXaf()} FCFA pour réactiver ton bot.`,
+      code: 'subscription_expired',
+    });
+  }
+
+  if (!req.user.exempt && bot.subscription_id) {
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('status, ends_at')
+      .eq('id', bot.subscription_id)
+      .maybeSingle();
+    if (sub && (sub.status === 'expired' || (sub.ends_at && new Date(sub.ends_at) <= new Date()))) {
+      return res.status(402).json({
+        error: `Abonnement expiré. Paye ${billing.priceXaf()} FCFA pour réactiver ton bot.`,
+        code: 'subscription_expired',
+      });
+    }
+  }
+
   const manager = managerFor(bot.plan_code);
-  if (bot.status !== 'connected') manager.wipeSession(bot.session_key);
+  // Après déconnexion manuelle la session est déjà effacée (pas de phone).
+  // Après suspension billing / paiement, on conserve la session WhatsApp.
+  if (!bot.phone_number) manager.wipeSession(bot.session_key);
   manager
     .startBot({ botId: bot.id, sessionKey: bot.session_key, planCode: bot.plan_code, force: true })
     .catch((err) => console.error(`Échec reconnexion bot ${bot.id}:`, err.message));

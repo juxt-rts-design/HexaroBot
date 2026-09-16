@@ -9,6 +9,16 @@ import { useToast } from '../context/ToastContext';
 import { useBotStatusWatcher } from '../hooks/useBotStatusWatcher';
 import { displayName } from '../utils/displayName';
 
+function money(n) {
+  return `${new Intl.NumberFormat('fr-FR').format(Number(n) || 0)} FCFA`;
+}
+
+function operatorLabel(code) {
+  if (code === 'AIRTEL_MONEY') return 'Airtel Money';
+  if (code === 'MOOV_MONEY') return 'MoBiCash';
+  return code || '—';
+}
+
 function extFromMime(mime) {
   if (!mime) return 'bin';
   if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
@@ -77,6 +87,8 @@ export default function AdminDashboard() {
   const [subscriptions, setSubscriptions] = useState([]);
   const [bots, setBots] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [revenue, setRevenue] = useState(null);
   const [tab, setTab] = useState('subscriptions');
   const [confirm, setConfirm] = useState(null);
 
@@ -90,16 +102,19 @@ export default function AdminDashboard() {
   useBotStatusWatcher(bots);
 
   async function refresh() {
-    const [u, s, b, l] = await Promise.all([
+    const [u, s, b, l, pay] = await Promise.all([
       api.get('/api/admin/users'),
       api.get('/api/admin/subscriptions'),
       api.get('/api/admin/bots'),
       api.get('/api/admin/view-once-logs'),
+      api.get('/api/admin/payments').catch(() => ({ data: { payments: [], stats: null } })),
     ]);
     setUsers(u.data.users);
     setSubscriptions(s.data.subscriptions);
     setBots(b.data.bots);
     setLogs(l.data.logs);
+    setPayments(pay.data.payments || []);
+    setRevenue(pay.data.stats || null);
   }
 
   useEffect(() => {
@@ -278,7 +293,7 @@ export default function AdminDashboard() {
       <div className="container">
         <div className="tabs">
           <button className={`btn${tab === 'subscriptions' ? ' active' : ''}`} onClick={() => setTab('subscriptions')}>
-            <Icon name="credit" size={15} /> Abonnements
+            <Icon name="credit" size={15} /> Recettes
           </button>
           <button className={`btn${tab === 'users' ? ' active' : ''}`} onClick={() => setTab('users')}>
             <Icon name="users" size={15} /> Utilisateurs
@@ -299,18 +314,33 @@ export default function AdminDashboard() {
 
         {tab === 'subscriptions' && (
           <section className="card">
-            <h2>Abonnements</h2>
-            <p className="muted">Paiement manuel pour le moment — active ou supprime les demandes.</p>
+            <div className="admin-section-head">
+              <div>
+                <h2>Recettes &amp; paiements</h2>
+                <p className="muted">Montants réellement encaissés via Airtel Money / MoBiCash (2100 FCFA / mois).</p>
+              </div>
+              {revenue && (
+                <div className="admin-stat-row">
+                  <span className="admin-stat ok"><strong>{money(revenue.total_success)}</strong> bénéfice</span>
+                  <span className="admin-stat"><strong>{revenue.count_success}</strong> payés</span>
+                  <span className="admin-stat"><strong>{money(revenue.month_success)}</strong> ce mois</span>
+                  <span className="admin-stat"><strong>{revenue.count_pending}</strong> en cours</span>
+                  <span className="admin-stat danger"><strong>{revenue.count_failed}</strong> échoués</span>
+                </div>
+              )}
+            </div>
+
+            <h3 className="admin-subhead">Abonnements</h3>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Utilisateur</th><th>Offre</th><th>Période</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
+                <thead><tr><th>Utilisateur</th><th>Offre</th><th>Essai</th><th>Fin d’accès</th><th>Statut</th><th></th></tr></thead>
                 <tbody>
                   {subscriptions.map((s) => (
                     <tr key={s.id}>
                       <td data-label="Utilisateur">{s.user_name} ({s.user_email})</td>
                       <td data-label="Offre">{s.plan_name}</td>
-                      <td data-label="Période">{s.period}</td>
-                      <td data-label="Montant">{s.amount} F</td>
+                      <td data-label="Essai">{s.is_trial ? 'Oui' : 'Non'}</td>
+                      <td data-label="Fin d’accès">{s.ends_at ? new Date(s.ends_at).toLocaleDateString('fr-FR') : '—'}</td>
                       <td data-label="Statut"><span className={`badge ${s.status === 'active' ? 'connected' : 'qr_pending'}`}>{s.status}</span></td>
                       <td data-label="" className="actions-cell">
                         <div className="actions-inner">
@@ -327,6 +357,41 @@ export default function AdminDashboard() {
                     </tr>
                   ))}
                   {!subscriptions.length && <tr><td colSpan={6} className="empty">Aucun abonnement.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="admin-subhead">Paiements Mobile Money</h3>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Utilisateur</th>
+                    <th>Opérateur</th>
+                    <th>Numéro</th>
+                    <th>Montant</th>
+                    <th>Statut</th>
+                    <th>Réf.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((p) => (
+                    <tr key={p.id}>
+                      <td data-label="Date">{new Date(p.created_at).toLocaleString('fr-FR')}</td>
+                      <td data-label="Utilisateur">{p.user_name || p.user_email || '—'}</td>
+                      <td data-label="Opérateur">{operatorLabel(p.operator_code)}</td>
+                      <td data-label="Numéro">{p.msisdn}</td>
+                      <td data-label="Montant">{money(p.amount)}</td>
+                      <td data-label="Statut">
+                        <span className={`badge ${p.status === 'SUCCESS' ? 'connected' : p.status === 'FAILED' ? 'blocked' : 'qr_pending'}`}>
+                          {p.status}
+                        </span>
+                      </td>
+                      <td data-label="Réf.">{p.reference}</td>
+                    </tr>
+                  ))}
+                  {!payments.length && <tr><td colSpan={7} className="empty">Aucun paiement pour le moment.</td></tr>}
                 </tbody>
               </table>
             </div>
