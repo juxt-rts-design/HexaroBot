@@ -149,7 +149,10 @@ function emit(botId, event, payload) {
 function sendSnapshot(socket, botId) {
   if (lastQr.has(botId)) socket.emit('qr', { qr: lastQr.get(botId) });
   if (lastPairing.has(botId)) socket.emit('pairing-code', lastPairing.get(botId));
-  if (lastStatus.has(botId)) socket.emit('status', lastStatus.get(botId));
+  const st = lastStatus.get(botId);
+  if (st && !(st.status === 'connected' && lastQr.has(botId))) {
+    socket.emit('status', st);
+  }
 }
 
 /**
@@ -313,12 +316,28 @@ function wipeSession(sessionKey) {
   fs.rmSync(path.join(SESSIONS_DIR, sessionKey), { recursive: true, force: true });
 }
 
+function sessionHasCreds(sessionKey) {
+  try {
+    const file = path.join(SESSIONS_DIR, sessionKey, 'creds.json');
+    if (!fs.existsSync(file)) return false;
+    const creds = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Boolean(creds?.me?.id || creds?.registered === true);
+  } catch {
+    return false;
+  }
+}
+
+function clearLiveState(botId) {
+  lastQr.delete(botId);
+  lastPairing.delete(botId);
+  pairingInFlight.delete(botId);
+  lastStatus.delete(botId);
+}
+
 async function startBot({ botId, sessionKey, force = false }) {
   if (force) {
     await killSocket(botId);
-    lastQr.delete(botId);
-    lastPairing.delete(botId);
-    pairingInFlight.delete(botId);
+    clearLiveState(botId);
   } else if (activeSockets.has(botId)) {
     return activeSockets.get(botId);
   }
@@ -657,23 +676,23 @@ async function disconnectBot(botId, sessionKey) {
 /** Coupe le socket sans logout WhatsApp ni wipe session (abonnement expiré). */
 async function pauseBot(botId) {
   await killSocket(botId);
-  lastQr.delete(botId);
-  lastPairing.delete(botId);
-  pairingInFlight.delete(botId);
+  clearLiveState(botId);
   reconnectAttempts.delete(botId);
 }
 
 async function restoreActiveSessions() {
   const { data: rows, error } = await supabase
     .from('bots')
-    .select('id, session_key')
+    .select('id, session_key, status')
     .eq('plan_code', 'vue_unique')
-    .in('status', ['connected', 'qr_pending']);
+    .neq('status', 'suspended');
   if (error) {
     console.error('restoreActiveSessions baileys:', error.message);
     return;
   }
   for (const bot of rows || []) {
+    const flagged = bot.status === 'connected' || bot.status === 'qr_pending';
+    if (!flagged && !sessionHasCreds(bot.session_key)) continue;
     startBot({ botId: bot.id, sessionKey: bot.session_key }).catch((err) =>
       console.error(`Échec restauration bot ${bot.id}:`, err.message)
     );
@@ -1066,6 +1085,7 @@ module.exports = {
   room,
   sendSnapshot,
   wipeSession,
+  sessionHasCreds,
   sendToSelf,
   sendToChat,
   sendMediaToChat,

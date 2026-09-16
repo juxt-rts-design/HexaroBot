@@ -30,6 +30,8 @@ export default function QrModal({ botId, onClose, onConnected }) {
         if (payload?.code) setPairingCode(payload.code);
       });
       socket.on('status', (payload) => {
+        if (!payload?.status) return;
+        if (payload.status === 'connected') setQr(null);
         setStatus(payload.status);
         if (payload.status === 'connected') onConnected?.();
       });
@@ -61,7 +63,7 @@ export default function QrModal({ botId, onClose, onConnected }) {
         <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <Icon name="whatsapp" size={20} /> Connecter WhatsApp
         </h3>
-        {status === 'connected' ? (
+        {status === 'connected' && !qr ? (
           <p style={{ color: 'var(--accent-bright)', display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center', width: '100%' }}>
             <Icon name="check" size={18} /> Numéro connecté avec succès
           </p>

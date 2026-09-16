@@ -64,6 +64,7 @@ async function startBot({ botId, sessionKey, planCode, force = false }) {
   if (force) {
     await killClient(botId);
     lastQr.delete(botId);
+    lastStatus.delete(botId);
   } else if (activeClients.has(botId)) {
     return activeClients.get(botId);
   }

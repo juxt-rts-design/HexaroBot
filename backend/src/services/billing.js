@@ -82,14 +82,51 @@ async function ensureSubscriptionForBot(userId, planCode, { exempt = false } = {
   return { ...sub, plan_code: planCode };
 }
 
-/** Anciens abos « 100 ans / 0 FCFA » → vrai essai 3 jours depuis starts_at. */
+/** Anciens abos « 100 ans / 0 FCFA » jamais payés → essai 3 jours. Les payants ne sont pas touchés. */
 async function clampLegacyFreeSub(sub, exempt) {
   if (!sub || exempt) return sub;
+  if (Number(sub.amount) > 0) {
+    if (sub.is_trial) {
+      await supabase.from('subscriptions').update({ is_trial: false }).eq('id', sub.id);
+      return { ...sub, is_trial: false };
+    }
+    return sub;
+  }
+
+  const { data: paidRows, error: payErr } = await supabase
+    .from('payments')
+    .select('created_at')
+    .eq('subscription_id', sub.id)
+    .eq('status', 'SUCCESS')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const lastPay = payErr ? null : paidRows?.[0];
+  if (lastPay) {
+    const fromPay = addDays(new Date(lastPay.created_at), BILLING_MONTH_DAYS);
+    const currentEnd = sub.ends_at ? new Date(sub.ends_at) : fromPay;
+    const endsAt = currentEnd > fromPay ? currentEnd : fromPay;
+    const now = Date.now();
+    const patch = {
+      is_trial: false,
+      amount: priceXaf(),
+      ends_at: endsAt.toISOString(),
+      status: endsAt.getTime() <= now ? 'expired' : 'active',
+    };
+    if (
+      sub.is_trial ||
+      Number(sub.amount) === 0 ||
+      (sub.ends_at && new Date(sub.ends_at).getTime() < fromPay.getTime() - 60 * 1000)
+    ) {
+      await supabase.from('subscriptions').update(patch).eq('id', sub.id);
+      return { ...sub, ...patch };
+    }
+    return { ...sub, is_trial: false };
+  }
+
   const ends = sub.ends_at ? new Date(sub.ends_at) : null;
   if (!ends) return sub;
   const remainingDays = (ends.getTime() - Date.now()) / 86400000;
-  const unpaid = Number(sub.amount) === 0;
-  if (remainingDays <= 90 || !unpaid) return sub;
+  if (remainingDays <= 90) return sub;
 
   const start = new Date(sub.starts_at || sub.created_at || Date.now());
   const trialEnd = addDays(start, trialDays());
@@ -109,10 +146,8 @@ function describeAccess(sub) {
     return { days_left: null, hours_left: null, expired: false, progress: 0 };
   }
   const msLeft = new Date(sub.ends_at).getTime() - Date.now();
-  const trialSpan = trialDays() * 24 * 60 * 60 * 1000;
-  const progress = sub.is_trial
-    ? Math.min(100, Math.max(0, (1 - msLeft / trialSpan) * 100))
-    : 0;
+  const spanMs = (sub.is_trial ? trialDays() : BILLING_MONTH_DAYS) * 24 * 60 * 60 * 1000;
+  const progress = Math.min(100, Math.max(0, (1 - msLeft / spanMs) * 100));
   return {
     days_left: msLeft > 0 ? Math.max(0, Math.ceil(msLeft / (24 * 60 * 60 * 1000))) : 0,
     hours_left: msLeft > 0 ? Math.max(1, Math.ceil(msLeft / (60 * 60 * 1000))) : 0,
@@ -210,8 +245,6 @@ async function resumeBotAfterPayment(bot, endsAtIso) {
     })
     .eq('id', bot.subscription_id);
 
-  await supabase.from('bots').update({ status: 'disconnected' }).eq('id', bot.id);
-
   try {
     await managerFor(bot.plan_code).startBot({
       botId: bot.id,
@@ -221,6 +254,7 @@ async function resumeBotAfterPayment(bot, endsAtIso) {
     });
   } catch (err) {
     console.error(`[billing] resume bot ${bot.id}:`, err.message);
+    await supabase.from('bots').update({ status: 'disconnected' }).eq('id', bot.id);
   }
 }
 

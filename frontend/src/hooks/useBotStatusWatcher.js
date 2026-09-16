@@ -9,13 +9,15 @@ const API_URL = import.meta.env.VITE_API_URL;
 /**
  * Écoute le statut Socket.IO de chaque bot et notifie (toast + push navigateur).
  */
-export function useBotStatusWatcher(bots = []) {
+export function useBotStatusWatcher(bots = [], { onStatus } = {}) {
   const { push } = useToast();
   const { notify, requestPermission } = useDesktopNotify();
   const lastStatus = useRef(new Map());
   const sockets = useRef(new Map());
   const botsRef = useRef(bots);
+  const onStatusRef = useRef(onStatus);
   botsRef.current = bots;
+  onStatusRef.current = onStatus;
 
   const botKey = useMemo(
     () => bots.map((b) => b.id).filter(Boolean).sort((a, b) => a - b).join(','),
@@ -51,6 +53,8 @@ export function useBotStatusWatcher(bots = []) {
 
         socket.on('connect', () => socket.emit('join-bot', id));
         socket.on('status', (payload) => {
+          if (!payload?.status) return;
+          onStatusRef.current?.(id, payload);
           const prev = lastStatus.current.get(id);
           lastStatus.current.set(id, payload.status);
           if (!prev || prev === payload.status) return;

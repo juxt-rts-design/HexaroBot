@@ -5,7 +5,21 @@ const billing = require('../services/billing');
 const OPERATORS = new Set(['AIRTEL_MONEY', 'MOOV_MONEY']);
 
 function normalizeMsisdn(raw) {
-  return String(raw || '').replace(/\D/g, '');
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.startsWith('241') && d.length >= 11) d = d.slice(3);
+  if (d.length === 8) d = `0${d}`;
+  return d;
+}
+
+async function subscriptionAccessForBot(userId, botId) {
+  if (!botId) return null;
+  try {
+    const snapshot = await billing.getBillingSnapshot(userId);
+    return snapshot.bots.find((b) => b.id === botId)?.subscription || null;
+  } catch {
+    return null;
+  }
 }
 
 exports.getBillingMe = async (req, res) => {
@@ -33,8 +47,18 @@ exports.createPayment = async (req, res) => {
         error: 'Choisis Airtel Money ou MoBiCash.',
       });
     }
-    if (!msisdn || msisdn.length < 8) {
+    if (!msisdn || msisdn.length < 8 || msisdn.length > 15) {
       return res.status(400).json({ error: 'Indique le numéro Mobile Money à débiter.' });
+    }
+    if (operator_code === 'MOOV_MONEY' && msisdn.startsWith('07')) {
+      return res.status(400).json({
+        error: 'Pour MoBiCash, utilise un numéro Libertis (ex. 065255797).',
+      });
+    }
+    if (operator_code === 'AIRTEL_MONEY' && msisdn.startsWith('06')) {
+      return res.status(400).json({
+        error: 'Pour Airtel Money, utilise un numéro Airtel (ex. 074000000).',
+      });
     }
 
     let botQuery = supabase
@@ -140,6 +164,9 @@ exports.getPaymentStatus = async (req, res) => {
     if (!row) return res.status(404).json({ error: 'Paiement introuvable.' });
 
     if (row.status === 'SUCCESS' || row.status === 'FAILED') {
+      const access = row.status === 'SUCCESS'
+        ? await subscriptionAccessForBot(req.user.id, row.bot_id)
+        : null;
       return res.json({
         success: true,
         payment: {
@@ -151,6 +178,7 @@ exports.getPaymentStatus = async (req, res) => {
           transaction_id: row.transaction_id,
           failure_reason: row.failure_reason,
         },
+        subscription: access,
       });
     }
 
@@ -172,6 +200,10 @@ exports.getPaymentStatus = async (req, res) => {
       row.transaction_id = next.transaction_id;
     }
 
+    const access = row.status === 'SUCCESS'
+      ? await subscriptionAccessForBot(req.user.id, row.bot_id)
+      : null;
+
     res.status(result.status).json({
       success: result.ok,
       payment: {
@@ -182,6 +214,7 @@ exports.getPaymentStatus = async (req, res) => {
         operator_code: row.operator_code,
         transaction_id: row.transaction_id,
       },
+      subscription: access,
     });
   } catch (err) {
     console.error('payments.status:', err.message);

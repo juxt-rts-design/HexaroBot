@@ -2457,6 +2457,12 @@ img.wa-avatar,
   line-height: 1.4;
 }
 
+.pay-msisdn-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .pay-amount-row {
   display: flex;
   justify-content: space-between;

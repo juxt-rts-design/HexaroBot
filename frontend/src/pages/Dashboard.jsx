@@ -15,7 +15,7 @@ import { displayBotLabel, displayPlanDescription, displayPlanName } from '../uti
 function accessLine(sub, exempt) {
   if (exempt) return 'Compte exempté';
   if (!sub) return '';
-  if (sub.expired) return 'Essai / abonnement terminé';
+  if (sub.expired) return 'Abonnement terminé';
   const until = sub.ends_at
     ? new Date(sub.ends_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
     : '';
@@ -23,6 +23,13 @@ function accessLine(sub, exempt) {
     if (sub.hours_left != null && sub.hours_left < 24) return `Essai · ${sub.hours_left} h restantes`;
     if (sub.days_left === 1) return `Essai · dernier jour (${until})`;
     return `Essai · ${sub.days_left} j restants (${until})`;
+  }
+  if (sub.hours_left != null && sub.hours_left < 24) {
+    return until ? `${sub.hours_left} h restantes · jusqu’au ${until}` : `${sub.hours_left} h restantes`;
+  }
+  if (typeof sub.days_left === 'number') {
+    const days = sub.days_left <= 1 ? 'Dernier jour' : `${sub.days_left} j restants`;
+    return until ? `${days} · jusqu’au ${until}` : days;
   }
   return until ? `Abonné jusqu’au ${until}` : 'Abonnement actif';
 }
@@ -42,7 +49,21 @@ export default function Dashboard() {
   const [confirm, setConfirm] = useState(null);
   const autoPayRef = useRef(false);
 
-  useBotStatusWatcher(bots);
+  useBotStatusWatcher(bots, {
+    onStatus: (id, payload) => {
+      setBots((prev) =>
+        prev.map((b) =>
+          b.id === id
+            ? {
+                ...b,
+                status: payload.status || b.status,
+                phone_number: payload.phone_number !== undefined ? payload.phone_number : b.phone_number,
+              }
+            : b
+        )
+      );
+    },
+  });
 
   async function refresh() {
     const [p, b] = await Promise.all([
@@ -164,13 +185,14 @@ export default function Dashboard() {
   const lastDay = bots.some(
     (b) => !b.subscription?.expired && typeof b.subscription?.hours_left === 'number' && b.subscription.hours_left <= 24
   );
+  const trialEnding = bots.some((b) => lastDay && b.subscription?.is_trial);
   const payForced = Boolean(
     payBot && (payBot.status === 'suspended' || payBot.subscription?.expired)
   );
 
   function closePay() {
-    if (payForced) return;
-    sessionStorage.setItem('hexaro-pay-dismissed', '1');
+    if (!payForced) sessionStorage.setItem('hexaro-pay-dismissed', '1');
+    else sessionStorage.removeItem('hexaro-pay-dismissed');
     setPayOpen(false);
   }
 
@@ -209,7 +231,9 @@ export default function Dashboard() {
                 ? `HexaroBot est en pause. ${price} FCFA pour le réactiver — rien n’est perdu.`
                 : lastDay
                   ? `Moins de 24 h d’accès. Sans paiement, le bot se met en pause automatiquement.`
-                  : `Essai bientôt terminé. Renouvelle pour ${price} FCFA / mois.`}
+                  : trialEnding
+                    ? `Essai bientôt terminé. Passe à ${price} FCFA / mois.`
+                    : `Abonnement bientôt terminé. Renouvelle pour ${price} FCFA / mois.`}
             </p>
             <button type="button" className="btn" onClick={() => openPay()}>
               Payer {price} FCFA
@@ -238,6 +262,8 @@ export default function Dashboard() {
                 <p className="price">
                   {user.exempt ? (
                     <span className="badge connected">Exempté</span>
+                  ) : limitReached ? (
+                    <span className="badge connected">{price} FCFA / mois</span>
                   ) : (
                     <span className="badge connected">Essai {trialDays} jours · puis {price} FCFA/mois</span>
                   )}
@@ -333,10 +359,19 @@ export default function Dashboard() {
         exempt={Boolean(user.exempt)}
         forced={payForced}
         onClose={closePay}
-        onPaid={() => {
+        onPaid={(access) => {
           sessionStorage.removeItem('hexaro-pay-dismissed');
           autoPayRef.current = false;
-          setPayOpen(false);
+          const days = access?.days_left;
+          push({
+            title: 'Paiement reçu',
+            message:
+              typeof days === 'number'
+                ? `Ton abonnement est actif. ${days} jour${days > 1 ? 's' : ''} restant${days > 1 ? 's' : ''}.`
+                : 'Ton abonnement est actif pour 30 jours.',
+            tone: 'success',
+            duration: 7000,
+          });
           refresh();
         }}
       />

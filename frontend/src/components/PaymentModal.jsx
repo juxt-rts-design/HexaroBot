@@ -3,8 +3,20 @@ import api from '../api/client';
 import { Icon } from './Icons';
 
 const OPERATORS = {
-  airtel: { code: 'AIRTEL_MONEY', label: 'Airtel Money', logo: '/logos/airtel.png' },
-  mobicash: { code: 'MOOV_MONEY', label: 'MoBiCash', logo: '/logos/moov.png' },
+  airtel: {
+    code: 'AIRTEL_MONEY',
+    label: 'Airtel Money',
+    logo: '/logos/airtel.png',
+    placeholder: '074000000',
+    hint: 'Numéro Airtel, ex. 074000000',
+  },
+  mobicash: {
+    code: 'MOOV_MONEY',
+    label: 'MoBiCash',
+    logo: '/logos/moov.png',
+    placeholder: '065255797',
+    hint: 'Numéro Libertis, ex. 065255797',
+  },
 };
 
 function formatAmount(n) {
@@ -91,8 +103,14 @@ export default function PaymentModal({
         if (st === 'SUCCESS') {
           stopPoll();
           setPhase('success');
-          setMessage('Paiement confirmé. Ton accès est prolongé d’un mois.');
-          onPaid?.();
+          const subAfter = res.data?.subscription;
+          const days = subAfter?.days_left;
+          setMessage(
+            typeof days === 'number'
+              ? `Paiement reçu. Il te reste ${days} jour${days > 1 ? 's' : ''}.`
+              : 'Paiement reçu. Ton accès est prolongé d’un mois.'
+          );
+          onPaid?.(subAfter);
         } else if (st === 'FAILED') {
           stopPoll();
           setPhase('failed');
@@ -185,7 +203,7 @@ export default function PaymentModal({
                 </span>
                 <strong>{remainingLabel(sub)}</strong>
               </div>
-              {trialActive && (
+              { (trialActive || paidActive) && (
                 <div className="pay-progress" aria-hidden="true">
                   <span style={{ width: `${Math.min(100, sub.progress || 0)}%` }} />
                 </div>
@@ -205,7 +223,7 @@ export default function PaymentModal({
               <div className="pay-feedback ok">
                 <Icon name="check" size={22} />
                 <div>
-                  <strong>Paiement réussi</strong>
+                  <strong>Paiement reçu</strong>
                   <p>{message}</p>
                 </div>
                 <button type="button" className="btn" onClick={onClose}>Fermer</button>
@@ -236,7 +254,10 @@ export default function PaymentModal({
                           name="operator"
                           value={key}
                           checked={operator === key}
-                          onChange={() => setOperator(key)}
+                          onChange={() => {
+                            setOperator(key);
+                            setMsisdn('');
+                          }}
                         />
                         <img src={op.logo} alt="" />
                         <span>{op.label}</span>
@@ -251,12 +272,13 @@ export default function PaymentModal({
                   type="tel"
                   inputMode="numeric"
                   autoComplete="tel"
-                  placeholder="074 00 00 00"
+                  placeholder={OPERATORS[operator].placeholder}
                   value={msisdn}
                   onChange={(e) => setMsisdn(e.target.value)}
                   required
                   disabled={busy}
                 />
+                <p className="pay-msisdn-hint">{OPERATORS[operator].hint}</p>
 
                 {phase === 'failed' && message && (
                   <p className="pay-error" role="alert">{message}</p>

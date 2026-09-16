@@ -183,13 +183,15 @@ exports.reconnect = async (req, res) => {
   }
 
   const manager = managerFor(bot.plan_code);
-  // Après déconnexion manuelle la session est déjà effacée (pas de phone).
-  // Après suspension billing / paiement, on conserve la session WhatsApp.
-  if (!bot.phone_number) manager.wipeSession(bot.session_key);
+  // Ne pas effacer une session encore enregistrée : le dashboard peut afficher
+  // « disconnected » alors que WhatsApp est toujours lié (redémarrage, pause billing).
+  const hasCreds = typeof manager.sessionHasCreds === 'function'
+    && manager.sessionHasCreds(bot.session_key);
+  if (!bot.phone_number && !hasCreds) manager.wipeSession(bot.session_key);
   manager
     .startBot({ botId: bot.id, sessionKey: bot.session_key, planCode: bot.plan_code, force: true })
     .catch((err) => console.error(`Échec reconnexion bot ${bot.id}:`, err.message));
-  res.json({ ok: true });
+  res.json({ ok: true, restoring: hasCreds });
 };
 
 exports.requestPairingCode = async (req, res) => {

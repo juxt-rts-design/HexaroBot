@@ -34,6 +34,7 @@ export default function Guide() {
           <ul>
             <li><strong>3 jours d’essai</strong> dès la création du bot.</li>
             <li>Ensuite : <strong>2 100 FCFA / mois</strong> (montant fixe).</li>
+            <li>Après paiement, tu vois le <strong>nombre de jours restants</strong> (plus l’essai 3 jours, réservé aux nouveaux).</li>
             <li>Paiement via <strong>Airtel Money</strong> ou <strong>MoBiCash</strong> : bouton <Link to="/dashboard?pay=1">Abonnement</Link> sur le dashboard.</li>
             <li>
               Si tu ne paies pas à temps, le bot est <strong>mis en pause</strong> (pas supprimé).
