@@ -349,7 +349,15 @@ export default function Dashboard() {
       </div>
 
       {qrBotId && (
-        <QrModal botId={qrBotId} onClose={() => setQrBotId(null)} onConnected={refresh} />
+        <QrModal
+          botId={qrBotId}
+          onClose={() => {
+            setQrBotId(null);
+            refresh();
+          }}
+          onConnected={refresh}
+          onRetry={() => reconnectBot(qrBotId)}
+        />
       )}
       <PaymentModal
         open={payOpen}

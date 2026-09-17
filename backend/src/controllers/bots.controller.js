@@ -194,6 +194,28 @@ exports.reconnect = async (req, res) => {
   res.json({ ok: true, restoring: hasCreds });
 };
 
+exports.connectState = async (req, res) => {
+  const { data: bot, error } = await supabase
+    .from('bots')
+    .select('id, plan_code, status, phone_number, session_key')
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!bot) return res.status(404).json({ error: 'Bot introuvable.' });
+  if (bot.plan_code !== 'vue_unique') {
+    return res.json({ status: bot.status, phone_number: bot.phone_number, qr: null, pairing: null, ready: false });
+  }
+  const live = baileysManager.getConnectSnapshot(bot.id);
+  res.json({
+    status: live.status || bot.status,
+    phone_number: live.phone_number || bot.phone_number,
+    qr: live.qr,
+    pairing: live.pairing,
+    ready: live.ready,
+  });
+};
+
 exports.requestPairingCode = async (req, res) => {
   const { data: bot, error } = await supabase
     .from('bots')
@@ -207,6 +229,12 @@ exports.requestPairingCode = async (req, res) => {
     return res.status(400).json({ error: 'Le code par numéro est disponible pour HexaroBot uniquement.' });
   }
   try {
+    const live = baileysManager.getConnectSnapshot(bot.id);
+    if (!live.ready) {
+      baileysManager
+        .startBot({ botId: bot.id, sessionKey: bot.session_key, planCode: bot.plan_code })
+        .catch((err) => console.error(`Échec start pairing bot ${bot.id}:`, err.message));
+    }
     const result = await baileysManager.requestPairingCode(bot.id, req.body?.phone);
     res.json(result);
   } catch (err) {

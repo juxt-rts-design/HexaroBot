@@ -114,6 +114,7 @@ const lastStatus = new Map();
 const lastPairing = new Map(); // botId -> { code, raw, phone }
 const pairingInFlight = new Map(); // botId -> Promise
 const reconnectAttempts = new Map(); // botId -> nombre de tentatives depuis la dernière connexion réussie
+const startLocks = new Map(); // botId -> Promise start en cours
 let ioRef = null;
 
 /** Même logique que Juxt : chiffres seuls + indicatif pays (ex. 24165255707). */
@@ -155,6 +156,50 @@ function sendSnapshot(socket, botId) {
   }
 }
 
+function getConnectSnapshot(botId) {
+  const id = Number(botId);
+  const st = lastStatus.get(id) || lastStatus.get(botId);
+  return {
+    status: st?.status || null,
+    phone_number: st?.phone_number || null,
+    qr: lastQr.get(id) || lastQr.get(botId) || null,
+    pairing: lastPairing.get(id) || lastPairing.get(botId) || null,
+    ready: activeSockets.has(id) || activeSockets.has(botId),
+  };
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function waitForUnregisteredSock(botId, ms = 25000) {
+  const t0 = Date.now();
+  const id = Number(botId);
+  while (Date.now() - t0 < ms) {
+    const sock = activeSockets.get(id) || activeSockets.get(botId);
+    if (sock?.authState?.creds?.registered) return { sock, registered: true };
+    if (sock) return { sock, registered: false };
+    await sleep(300);
+  }
+  const sock = activeSockets.get(id) || activeSockets.get(botId);
+  return {
+    sock: sock || null,
+    registered: Boolean(sock?.authState?.creds?.registered),
+  };
+}
+
+async function resolveWaVersion() {
+  try {
+    return await Promise.race([
+      fetchLatestBaileysVersion(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout version WA')), 8000)),
+    ]);
+  } catch (err) {
+    console.warn('[baileys] version WA indisponible, fallback :', err.message);
+    return { version: [2, 3000, 1027934701], isLatest: false };
+  }
+}
+
 /**
  * Demande un code d’auth WhatsApp (8 chiffres) pour lier sans scanner le QR.
  * À appeler quand le bot est en qr_pending — même flux que Juxt requestPairingCode.
@@ -167,40 +212,51 @@ async function requestPairingCode(botId, phoneRaw) {
     throw err;
   }
 
-  const sock = activeSockets.get(botId);
-  if (!sock) {
-    const err = new Error('Bot pas encore prêt. Attends que le QR s’affiche, puis réessaie.');
-    err.status = 409;
-    throw err;
-  }
-  if (sock.authState?.creds?.registered) {
+  const { sock, registered } = await waitForUnregisteredSock(botId, 25000);
+  if (registered) {
     const err = new Error('Ce bot est déjà lié à WhatsApp.');
     err.status = 409;
     throw err;
   }
+  if (!sock) {
+    const err = new Error('WhatsApp n’est pas encore prêt. Clique Relancer, puis réessaie.');
+    err.status = 409;
+    throw err;
+  }
 
-  if (pairingInFlight.has(botId)) return pairingInFlight.get(botId);
+  if (pairingInFlight.has(Number(botId)) || pairingInFlight.has(botId)) {
+    return pairingInFlight.get(Number(botId)) || pairingInFlight.get(botId);
+  }
 
+  const id = Number(botId);
   const job = (async () => {
-    // Petit délai comme Juxt : laisse le canal auth se stabiliser après le QR.
-    await new Promise((r) => setTimeout(r, 1500));
-    if (activeSockets.get(botId) !== sock) {
-      const err = new Error('Connexion interrompue. Rouvre la fenêtre et réessaie.');
+    await sleep(1500);
+    const current = activeSockets.get(id) || activeSockets.get(botId);
+    if (!current) {
+      const err = new Error('Connexion interrompue. Clique Relancer, puis réessaie.');
       err.status = 409;
       throw err;
     }
-    const code = await sock.requestPairingCode(phone);
+    const waitQrUntil = Date.now() + 20000;
+    while (!lastQr.has(id) && !lastQr.has(botId) && Date.now() < waitQrUntil) {
+      if (current.authState?.creds?.registered) break;
+      await sleep(400);
+    }
+    const code = await current.requestPairingCode(phone);
     const payload = {
       code: formatPairingCode(code),
       raw: String(code || '').replace(/\s+/g, ''),
       phone,
     };
-    lastPairing.set(botId, payload);
-    emit(botId, 'pairing-code', payload);
+    lastPairing.set(id, payload);
+    emit(id, 'pairing-code', payload);
     return payload;
-  })().finally(() => pairingInFlight.delete(botId));
+  })().finally(() => {
+    pairingInFlight.delete(id);
+    pairingInFlight.delete(botId);
+  });
 
-  pairingInFlight.set(botId, job);
+  pairingInFlight.set(id, job);
   return job;
 }
 
@@ -332,9 +388,28 @@ function clearLiveState(botId) {
   lastPairing.delete(botId);
   pairingInFlight.delete(botId);
   lastStatus.delete(botId);
+  reconnectAttempts.delete(botId);
 }
 
 async function startBot({ botId, sessionKey, force = false }) {
+  if (!force && activeSockets.has(botId)) {
+    return activeSockets.get(botId);
+  }
+
+  const prev = startLocks.get(botId);
+  if (prev) {
+    if (!force) return prev;
+    try { await prev; } catch { /* relance forcée */ }
+  }
+
+  const job = runStartBot({ botId, sessionKey, force }).finally(() => {
+    if (startLocks.get(botId) === job) startLocks.delete(botId);
+  });
+  startLocks.set(botId, job);
+  return job;
+}
+
+async function runStartBot({ botId, sessionKey, force = false }) {
   if (force) {
     await killSocket(botId);
     clearLiveState(botId);
@@ -344,25 +419,30 @@ async function startBot({ botId, sessionKey, force = false }) {
 
   const authDir = path.join(SESSIONS_DIR, sessionKey);
   fs.mkdirSync(authDir, { recursive: true });
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  // La version WA-Web embarquée dans la lib se périme vite ; sans ça WhatsApp
-  // ferme la connexion juste après le scan du QR au lieu de finaliser le pairing.
-  const { version } = await fetchLatestBaileysVersion();
+  let sock;
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const { version } = await resolveWaVersion();
 
-  // Browsers.ubuntu('Chrome') : recommandé Baileys pour le code d’auth (comme Juxt).
-  const sock = makeWASocket({
-    auth: state,
-    version,
-    logger: pino({ level: 'silent' }),
-    printQRInTerminal: false,
-    browser: Browsers.ubuntu('Chrome'),
-    syncFullHistory: true,
-    markOnlineOnConnect: true,
-    shouldSyncHistoryMessage: () => true,
-  });
-
-  activeSockets.set(botId, sock);
-  sock.ev.on('creds.update', saveCreds);
+    sock = makeWASocket({
+      auth: state,
+      version,
+      logger: pino({ level: 'silent' }),
+      printQRInTerminal: false,
+      browser: Browsers.ubuntu('Chrome'),
+      syncFullHistory: true,
+      markOnlineOnConnect: true,
+      shouldSyncHistoryMessage: () => true,
+      connectTimeoutMs: 60_000,
+      keepAliveIntervalMs: 15_000,
+    });
+    activeSockets.set(botId, sock);
+    sock.ev.on('creds.update', saveCreds);
+  } catch (err) {
+    console.error(`[baileys bot ${botId}] démarrage :`, err.message);
+    await setStatus(botId, 'disconnected');
+    throw err;
+  }
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, qr, lastDisconnect } = update;
@@ -390,19 +470,21 @@ async function startBot({ botId, sessionKey, force = false }) {
         `[baileys bot ${botId}] connexion fermée, statusCode=${statusCode}, message=${lastDisconnect?.error?.message}`
       );
 
-      // Le 515 "restart required" (déroulé normal juste après le scan du QR)
-      // relance toujours immédiatement. Pour les autres coupures, on ne
-      // relance que si le bot avait déjà été connecté (coupure réseau en
-      // cours de route) — jamais pour un QR jamais scanné (408 "QR refs
-      // attempts ended"), sinon un bot abandonné boucle à l'infini. Le
-      // logout (401) reste définitif : il faut un nouveau scan.
       const wasConnected = lastStatus.get(botId)?.status === 'connected';
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isBadSession = statusCode === DisconnectReason.badSession;
+      const attempt = (reconnectAttempts.get(botId) || 0) + 1;
+      reconnectAttempts.set(botId, attempt);
 
-      if (!isLoggedOut && (statusCode === DisconnectReason.restartRequired || wasConnected)) {
-        const attempt = (reconnectAttempts.get(botId) || 0) + 1;
-        reconnectAttempts.set(botId, attempt);
-        const delay = statusCode === DisconnectReason.restartRequired ? 1000 : Math.min(attempt * 3000, 30000);
+      const qrRetriesLeft = !wasConnected && attempt <= 8;
+      const liveRetriesLeft = wasConnected && attempt <= 30;
+      const shouldRetry =
+        !isLoggedOut &&
+        !isBadSession &&
+        (statusCode === DisconnectReason.restartRequired || liveRetriesLeft || qrRetriesLeft);
+
+      if (shouldRetry) {
+        const delay = statusCode === DisconnectReason.restartRequired ? 1000 : Math.min(attempt * 1500, 12000);
         setTimeout(() => {
           startBot({ botId, sessionKey }).catch((err) =>
             console.error(`Échec reconnexion auto bot ${botId}:`, err.message)
@@ -414,7 +496,7 @@ async function startBot({ botId, sessionKey, force = false }) {
       lastQr.delete(botId);
       lastPairing.delete(botId);
       pairingInFlight.delete(botId);
-      await setStatus(botId, 'disconnected', isLoggedOut ? { phone_number: null } : {});
+      await setStatus(botId, 'disconnected', isLoggedOut || isBadSession ? { phone_number: null } : {});
     }
   });
 
@@ -1084,6 +1166,7 @@ module.exports = {
   restoreActiveSessions,
   room,
   sendSnapshot,
+  getConnectSnapshot,
   wipeSession,
   sessionHasCreds,
   sendToSelf,

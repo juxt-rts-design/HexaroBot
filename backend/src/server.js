@@ -21,7 +21,12 @@ const billing = require('./services/billing');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: process.env.FRONTEND_URL, credentials: true },
+  cors: {
+    origin: true,
+    credentials: true,
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 app.set('trust proxy', 1);
