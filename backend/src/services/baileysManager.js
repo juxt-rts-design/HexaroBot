@@ -168,23 +168,60 @@ function getConnectSnapshot(botId) {
   };
 }
 
+function getSock(botId) {
+  const id = Number(botId);
+  return activeSockets.get(id) || activeSockets.get(botId) || null;
+}
+
+function isLiveConnected(botId) {
+  return Boolean(getSock(botId)?.user?.id);
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function resetSession(botId, sessionKey) {
+  await killSocket(botId);
+  clearLiveState(botId);
+  wipeSession(sessionKey);
+}
+
+/** Session disque « registered » mais WhatsApp pas vraiment ouvert → on repart sur un QR. */
+async function prepareForPairing(botId, sessionKey) {
+  if (isLiveConnected(botId)) {
+    const err = new Error('Ce bot est déjà lié à WhatsApp.');
+    err.status = 409;
+    throw err;
+  }
+  const sock = getSock(botId);
+  const stale = Boolean(sock?.authState?.creds?.registered || sessionHasCreds(sessionKey));
+  if (stale) {
+    console.warn(`[baileys bot ${botId}] session périmée (fichier lié, pas de connexion) → nouveau QR`);
+    await resetSession(botId, sessionKey);
+  }
+  if (!getSock(botId)) {
+    await startBot({ botId, sessionKey, force: stale });
+  }
+}
+
 async function waitForUnregisteredSock(botId, ms = 25000) {
   const t0 = Date.now();
-  const id = Number(botId);
   while (Date.now() - t0 < ms) {
-    const sock = activeSockets.get(id) || activeSockets.get(botId);
-    if (sock?.authState?.creds?.registered) return { sock, registered: true };
-    if (sock) return { sock, registered: false };
+    if (isLiveConnected(botId)) {
+      return { sock: getSock(botId), registered: true, live: true };
+    }
+    const sock = getSock(botId);
+    if (sock && !sock.authState?.creds?.registered) {
+      return { sock, registered: false, live: false };
+    }
     await sleep(300);
   }
-  const sock = activeSockets.get(id) || activeSockets.get(botId);
+  const sock = getSock(botId);
   return {
     sock: sock || null,
     registered: Boolean(sock?.authState?.creds?.registered),
+    live: isLiveConnected(botId),
   };
 }
 
@@ -212,9 +249,14 @@ async function requestPairingCode(botId, phoneRaw) {
     throw err;
   }
 
-  const { sock, registered } = await waitForUnregisteredSock(botId, 25000);
-  if (registered) {
+  const { sock, registered, live } = await waitForUnregisteredSock(botId, 25000);
+  if (live) {
     const err = new Error('Ce bot est déjà lié à WhatsApp.');
+    err.status = 409;
+    throw err;
+  }
+  if (registered) {
+    const err = new Error('Ancienne session WhatsApp encore en mémoire. Clique Relancer, puis réessaie.');
     err.status = 409;
     throw err;
   }
@@ -239,8 +281,13 @@ async function requestPairingCode(botId, phoneRaw) {
     }
     const waitQrUntil = Date.now() + 20000;
     while (!lastQr.has(id) && !lastQr.has(botId) && Date.now() < waitQrUntil) {
-      if (current.authState?.creds?.registered) break;
+      if (isLiveConnected(id)) break;
       await sleep(400);
+    }
+    if (isLiveConnected(id)) {
+      const err = new Error('Ce bot est déjà lié à WhatsApp.');
+      err.status = 409;
+      throw err;
     }
     const code = await current.requestPairingCode(phone);
     const payload = {
@@ -765,7 +812,7 @@ async function pauseBot(botId) {
 async function restoreActiveSessions() {
   const { data: rows, error } = await supabase
     .from('bots')
-    .select('id, session_key, status')
+    .select('id, session_key, status, phone_number')
     .eq('plan_code', 'vue_unique')
     .neq('status', 'suspended');
   if (error) {
@@ -773,8 +820,9 @@ async function restoreActiveSessions() {
     return;
   }
   for (const bot of rows || []) {
-    const flagged = bot.status === 'connected' || bot.status === 'qr_pending';
-    if (!flagged && !sessionHasCreds(bot.session_key)) continue;
+    const live = bot.status === 'connected' || bot.status === 'qr_pending';
+    const restorable = bot.status === 'disconnected' && bot.phone_number && sessionHasCreds(bot.session_key);
+    if (!live && !restorable) continue;
     startBot({ botId: bot.id, sessionKey: bot.session_key }).catch((err) =>
       console.error(`Échec restauration bot ${bot.id}:`, err.message)
     );
@@ -1168,7 +1216,10 @@ module.exports = {
   sendSnapshot,
   getConnectSnapshot,
   wipeSession,
+  resetSession,
   sessionHasCreds,
+  isLiveConnected,
+  prepareForPairing,
   sendToSelf,
   sendToChat,
   sendMediaToChat,

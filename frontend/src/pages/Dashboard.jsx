@@ -150,10 +150,10 @@ export default function Dashboard() {
     });
   }
 
-  function reconnectBot(botId) {
+  function reconnectBot(botId, { fresh = false } = {}) {
     return run(`reconnect-${botId}`, async () => {
       try {
-        await api.post(`/api/bots/${botId}/reconnect`);
+        await api.post(`/api/bots/${botId}/reconnect`, fresh ? { fresh: true } : {});
         setQrBotId(botId);
       } catch (err) {
         if (err.response?.status === 402 || err.response?.data?.code === 'subscription_expired') {
@@ -328,7 +328,7 @@ export default function Dashboard() {
                         type="button"
                         className="btn bot-action-btn"
                         disabled={isBusy(`reconnect-${b.id}`)}
-                        onClick={() => reconnectBot(b.id)}
+                        onClick={() => reconnectBot(b.id, { fresh: !b.phone_number })}
                       >
                         <Icon name="link" size={15} />
                         <span>{isBusy(`reconnect-${b.id}`) ? '…' : 'Connecter'}</span>
@@ -356,7 +356,7 @@ export default function Dashboard() {
             refresh();
           }}
           onConnected={refresh}
-          onRetry={() => reconnectBot(qrBotId)}
+          onRetry={() => reconnectBot(qrBotId, { fresh: true })}
         />
       )}
       <PaymentModal

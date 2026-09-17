@@ -183,15 +183,26 @@ exports.reconnect = async (req, res) => {
   }
 
   const manager = managerFor(bot.plan_code);
-  // Ne pas effacer une session encore enregistrée : le dashboard peut afficher
-  // « disconnected » alors que WhatsApp est toujours lié (redémarrage, pause billing).
+  const fresh = Boolean(req.body?.fresh);
+  const live = typeof manager.isLiveConnected === 'function' && manager.isLiveConnected(bot.id);
+  if (live && !fresh) {
+    return res.json({ ok: true, restoring: true });
+  }
+
   const hasCreds = typeof manager.sessionHasCreds === 'function'
     && manager.sessionHasCreds(bot.session_key);
-  if (!bot.phone_number && !hasCreds) manager.wipeSession(bot.session_key);
+  const restore = !fresh && Boolean(bot.phone_number) && hasCreds;
+  if (!restore) {
+    if (typeof manager.resetSession === 'function') {
+      await manager.resetSession(bot.id, bot.session_key);
+    } else {
+      manager.wipeSession(bot.session_key);
+    }
+  }
   manager
     .startBot({ botId: bot.id, sessionKey: bot.session_key, planCode: bot.plan_code, force: true })
     .catch((err) => console.error(`Échec reconnexion bot ${bot.id}:`, err.message));
-  res.json({ ok: true, restoring: hasCreds });
+  res.json({ ok: true, restoring: restore });
 };
 
 exports.connectState = async (req, res) => {
@@ -229,12 +240,7 @@ exports.requestPairingCode = async (req, res) => {
     return res.status(400).json({ error: 'Le code par numéro est disponible pour HexaroBot uniquement.' });
   }
   try {
-    const live = baileysManager.getConnectSnapshot(bot.id);
-    if (!live.ready) {
-      baileysManager
-        .startBot({ botId: bot.id, sessionKey: bot.session_key, planCode: bot.plan_code })
-        .catch((err) => console.error(`Échec start pairing bot ${bot.id}:`, err.message));
-    }
+    await baileysManager.prepareForPairing(bot.id, bot.session_key);
     const result = await baileysManager.requestPairingCode(bot.id, req.body?.phone);
     res.json(result);
   } catch (err) {
