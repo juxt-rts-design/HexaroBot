@@ -3,13 +3,36 @@ const { darepayFetch, extractPayment } = require('../services/darepay');
 const billing = require('../services/billing');
 
 const OPERATORS = new Set(['AIRTEL_MONEY', 'MOOV_MONEY']);
+/** MoBiCash (Libertis) met parfois FAILED le temps que le USSD arrive — ne pas figer trop tôt. */
+const FAILED_GRACE_MS = 75 * 1000;
 
 function normalizeMsisdn(raw) {
   let d = String(raw || '').replace(/\D/g, '');
   if (d.startsWith('00')) d = d.slice(2);
-  if (d.startsWith('241') && d.length >= 11) d = d.slice(3);
+  if (d.startsWith('241')) {
+    d = d.slice(3);
+    if (d.startsWith('0')) d = d.slice(1);
+  }
   if (d.length === 8) d = `0${d}`;
   return d;
+}
+
+function paymentAgeMs(row) {
+  const t = new Date(row?.created_at || 0).getTime();
+  return Number.isFinite(t) ? Date.now() - t : 0;
+}
+
+function serializePayment(row, extra = {}) {
+  return {
+    reference: row.reference,
+    amount: row.amount,
+    currency: row.currency,
+    status: row.status,
+    operator_code: row.operator_code,
+    transaction_id: row.transaction_id,
+    failure_reason: row.failure_reason,
+    ...extra,
+  };
 }
 
 async function subscriptionAccessForBot(userId, botId) {
@@ -50,14 +73,14 @@ exports.createPayment = async (req, res) => {
     if (!msisdn || msisdn.length < 8 || msisdn.length > 15) {
       return res.status(400).json({ error: 'Indique le numéro Mobile Money à débiter.' });
     }
-    if (operator_code === 'MOOV_MONEY' && msisdn.startsWith('07')) {
+    if (operator_code === 'MOOV_MONEY' && !/^06\d{7}$/.test(msisdn)) {
       return res.status(400).json({
-        error: 'Pour MoBiCash, utilise un numéro Libertis (ex. 065255797).',
+        error: 'Pour MoBiCash, entre un numéro Libertis à 9 chiffres (ex. 065255797).',
       });
     }
-    if (operator_code === 'AIRTEL_MONEY' && msisdn.startsWith('06')) {
+    if (operator_code === 'AIRTEL_MONEY' && !/^07\d{7}$/.test(msisdn)) {
       return res.status(400).json({
-        error: 'Pour Airtel Money, utilise un numéro Airtel (ex. 074000000).',
+        error: 'Pour Airtel Money, entre un numéro Airtel à 9 chiffres (ex. 074000000).',
       });
     }
 
@@ -78,9 +101,9 @@ exports.createPayment = async (req, res) => {
     const reference = billing.generateReference();
     const payload = {
       reference,
-      amount,
+      amount: Number(amount),
       currency: 'XAF',
-      customer_msisdn: msisdn,
+      customer_msisdn: String(msisdn),
       operator_code,
     };
 
@@ -109,24 +132,31 @@ exports.createPayment = async (req, res) => {
       body: JSON.stringify(payload),
     });
     const payment = extractPayment(result.body);
+    console.log(
+      `[payments] init ref=${reference} op=${operator_code} msisdn=${msisdn} http=${result.status} success=${result.body?.success} status=${payment?.status || '-'}`
+    );
+
+    const initFailed =
+      !result.ok ||
+      result.body?.success === false ||
+      payment?.status === 'FAILED';
 
     const patch = {
       updated_at: new Date().toISOString(),
       darepay_payment_id: payment?.payment_id != null ? String(payment.payment_id) : null,
       transaction_id: payment?.transaction_id || null,
-      status: payment?.status === 'FAILED' ? 'FAILED' : 'PENDING',
-      failure_reason:
-        result.body?.success === false
-          ? result.body?.message || 'Paiement non initié'
-          : null,
+      status: initFailed ? 'FAILED' : 'PENDING',
+      failure_reason: initFailed
+        ? (payment?.failure_reason || result.body?.message || 'Paiement non initié')
+        : null,
     };
     await supabase.from('payments').update(patch).eq('id', paymentRow.id);
 
-    if (!result.ok || result.body?.success === false) {
-      let message = result.body?.message || 'Paiement non initié. Réessaie dans un instant.';
-      if (operator_code === 'MOOV_MONEY' && /gateway|http/i.test(message)) {
+    if (initFailed) {
+      let message = patch.failure_reason;
+      if (operator_code === 'MOOV_MONEY' && /gateway|http/i.test(String(result.body?.message || ''))) {
         message =
-          'MoBiCash est indisponible côté opérateur pour le moment. Essaie Airtel Money.';
+          'MoBiCash n’a pas pu envoyer la demande. Vérifie le numéro Libertis (06…) et réessaie.';
       }
       return res.status(result.status >= 400 ? result.status : 502).json({
         success: false,
@@ -137,14 +167,7 @@ exports.createPayment = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      payment: {
-        reference,
-        amount,
-        currency: 'XAF',
-        status: payment?.status || 'PENDING',
-        operator_code,
-        transaction_id: payment?.transaction_id || null,
-      },
+      payment: serializePayment({ ...paymentRow, ...patch, amount, currency: 'XAF', operator_code }),
     });
   } catch (err) {
     console.error('payments.create:', err.message);
@@ -163,57 +186,62 @@ exports.getPaymentStatus = async (req, res) => {
       .maybeSingle();
     if (!row) return res.status(404).json({ error: 'Paiement introuvable.' });
 
-    if (row.status === 'SUCCESS' || row.status === 'FAILED') {
-      const access = row.status === 'SUCCESS'
-        ? await subscriptionAccessForBot(req.user.id, row.bot_id)
-        : null;
+    if (row.status === 'SUCCESS') {
+      const access = await subscriptionAccessForBot(req.user.id, row.bot_id);
       return res.json({
         success: true,
-        payment: {
-          reference: row.reference,
-          amount: row.amount,
-          currency: row.currency,
-          status: row.status,
-          operator_code: row.operator_code,
-          transaction_id: row.transaction_id,
-          failure_reason: row.failure_reason,
-        },
+        payment: serializePayment(row),
         subscription: access,
       });
     }
 
     const result = await darepayFetch(`/payments/${encodeURIComponent(reference)}/status`);
     const payment = extractPayment(result.body);
-    if (payment?.status && payment.status !== row.status) {
-      const next = {
-        status: payment.status,
-        transaction_id: payment.transaction_id || row.transaction_id,
-        darepay_payment_id:
-          payment.payment_id != null ? String(payment.payment_id) : row.darepay_payment_id,
-        updated_at: new Date().toISOString(),
-      };
-      await supabase.from('payments').update(next).eq('id', row.id);
-      if (payment.status === 'SUCCESS') {
+    const remoteStatus = payment?.status;
+    console.log(
+      `[payments] status ref=${reference} db=${row.status} http=${result.status} remote=${remoteStatus || '-'}`
+    );
+
+    if (remoteStatus && remoteStatus !== row.status) {
+      if (remoteStatus === 'SUCCESS') {
+        const next = {
+          status: 'SUCCESS',
+          transaction_id: payment.transaction_id || row.transaction_id,
+          darepay_payment_id:
+            payment.payment_id != null ? String(payment.payment_id) : row.darepay_payment_id,
+          failure_reason: null,
+          updated_at: new Date().toISOString(),
+        };
+        await supabase.from('payments').update(next).eq('id', row.id);
         await billing.applySuccessfulPayment({ ...row, ...next });
+        Object.assign(row, next);
+      } else if (remoteStatus === 'FAILED') {
+        const reason = payment.failure_reason || result.body?.message || 'Transaction échouée';
+        const tooEarly = paymentAgeMs(row) < FAILED_GRACE_MS;
+        if (tooEarly) {
+          console.warn(`[payments] FAILED ignoré (USSD en cours) ref=${reference} age=${paymentAgeMs(row)}ms`);
+        } else {
+          const next = {
+            status: 'FAILED',
+            transaction_id: payment.transaction_id || row.transaction_id,
+            darepay_payment_id:
+              payment.payment_id != null ? String(payment.payment_id) : row.darepay_payment_id,
+            failure_reason: reason,
+            updated_at: new Date().toISOString(),
+          };
+          await supabase.from('payments').update(next).eq('id', row.id);
+          Object.assign(row, next);
+        }
       }
-      row.status = payment.status;
-      row.transaction_id = next.transaction_id;
     }
 
     const access = row.status === 'SUCCESS'
       ? await subscriptionAccessForBot(req.user.id, row.bot_id)
       : null;
 
-    res.status(result.status).json({
-      success: result.ok,
-      payment: {
-        reference: row.reference,
-        amount: row.amount,
-        currency: row.currency,
-        status: row.status,
-        operator_code: row.operator_code,
-        transaction_id: row.transaction_id,
-      },
+    res.json({
+      success: true,
+      payment: serializePayment(row),
       subscription: access,
     });
   } catch (err) {
@@ -278,6 +306,16 @@ exports.hexapayCallback = async (req, res) => {
 
     if (alreadyDone) {
       return res.status(200).json({ received: true, reference, transaction_id, duplicate: true });
+    }
+
+    if (
+      status === 'FAILED' &&
+      row.operator_code === 'MOOV_MONEY' &&
+      row.status !== 'SUCCESS' &&
+      paymentAgeMs(row) < FAILED_GRACE_MS
+    ) {
+      console.warn(`[hexapay] FAILED MoBiCash ignoré (USSD) ref=${reference}`);
+      return res.status(200).json({ received: true, ignored: true, reason: 'moov_ussd_grace' });
     }
 
     const patch = {

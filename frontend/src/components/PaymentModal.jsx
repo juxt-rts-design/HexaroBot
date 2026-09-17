@@ -15,7 +15,7 @@ const OPERATORS = {
     label: 'MoBiCash',
     logo: '/logos/moov.png',
     placeholder: '065255797',
-    hint: 'Numéro Libertis, ex. 065255797',
+                hint: 'Numéro Libertis à 9 chiffres, ex. 065255797',
   },
 };
 
@@ -90,13 +90,15 @@ export default function PaymentModal({
   function stopPoll() {
     if (pollRef.current) {
       clearInterval(pollRef.current);
+      clearTimeout(pollRef.current);
       pollRef.current = null;
     }
   }
 
-  function startPoll(ref) {
+  function startPoll(ref, operatorKey) {
     stopPoll();
-    pollRef.current = setInterval(async () => {
+    const firstDelay = operatorKey === 'mobicash' ? 5000 : 2500;
+    const tick = async () => {
       try {
         const res = await api.get(`/api/payments/${encodeURIComponent(ref)}/status`);
         const st = res.data?.payment?.status;
@@ -119,7 +121,13 @@ export default function PaymentModal({
       } catch {
         /* ignore */
       }
-    }, 3500);
+    };
+    const start = setTimeout(() => {
+      if (pollRef.current !== start) return;
+      tick();
+      pollRef.current = setInterval(tick, operatorKey === 'mobicash' ? 4000 : 3500);
+    }, firstDelay);
+    pollRef.current = start;
   }
 
   async function onSubmit(e) {
@@ -142,8 +150,12 @@ export default function PaymentModal({
       const ref = res.data?.payment?.reference || '';
       setReference(ref);
       setPhase('pending');
-      setMessage(`Valide ${formatAmount(price)} FCFA sur ton téléphone ${op.label}.`);
-      if (ref) startPoll(ref);
+      setMessage(
+        operator === 'mobicash'
+          ? `Valide ${formatAmount(price)} FCFA sur ton téléphone MoBiCash (message / USSD). Ça peut prendre jusqu’à 1 minute.`
+          : `Valide ${formatAmount(price)} FCFA sur ton téléphone ${op.label}.`
+      );
+      if (ref) startPoll(ref, operator);
     } catch (err) {
       setPhase('failed');
       setMessage(err.response?.data?.error || err.message || 'Impossible d’initier le paiement.');
