@@ -6,6 +6,7 @@ router.use(requireAdmin);
 router.get('/users', ctrl.listUsers);
 router.post('/users/:id/exempt', ctrl.setExempt);
 router.post('/users/:id/block', ctrl.setBlocked);
+router.delete('/users/:id', ctrl.deleteUser);
 router.post('/broadcast', ctrl.broadcast);
 router.get('/subscriptions', ctrl.listSubscriptions);
 router.get('/payments', ctrl.listPayments);

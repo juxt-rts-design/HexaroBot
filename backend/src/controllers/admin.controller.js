@@ -7,16 +7,85 @@ const baileysManager = require('../services/baileysManager');
 const { transcodeToOggOpus } = require('../services/audioTranscoder');
 const { pickBestChatName } = require('../utils/chatNames');
 const billing = require('../services/billing');
+const trialPhoneGuard = require('../services/trialPhoneGuard');
 
 exports.uploadMedia = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } }).single('file');
 
 exports.listUsers = async (req, res) => {
-  const { data, error } = await supabase
+  let query = supabase
     .from('profiles')
-    .select('id, email, name, role, exempt, blocked, created_at')
+    .select('id, email, name, role, exempt, blocked, created_at, bots(phone_number, status)')
     .order('created_at', { ascending: false });
+  let { data, error } = await query;
+  if (error && /bots/i.test(error.message || '')) {
+    const retry = await supabase
+      .from('profiles')
+      .select('id, email, name, role, exempt, blocked, created_at')
+      .order('created_at', { ascending: false });
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ users: data || [] });
+  const users = (data || []).map((u) => {
+    const phones = [...new Set((u.bots || []).map((b) => b.phone_number).filter(Boolean))];
+    return {
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      role: u.role,
+      exempt: u.exempt,
+      blocked: u.blocked,
+      created_at: u.created_at,
+      phones,
+    };
+  });
+  res.json({ users });
+};
+
+exports.deleteUser = async (req, res) => {
+  const { id } = req.params;
+  if (!id || id === req.user.id) {
+    return res.status(400).json({ error: 'Tu ne peux pas supprimer ton propre compte.' });
+  }
+
+  const { data: user, error: findErr } = await supabase
+    .from('profiles')
+    .select('id, email, role')
+    .eq('id', id)
+    .maybeSingle();
+  if (findErr) return res.status(500).json({ error: findErr.message });
+  if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+  if (user.role === 'admin') {
+    return res.status(403).json({ error: 'Impossible de supprimer un administrateur.' });
+  }
+
+  const { data: bots } = await supabase
+    .from('bots')
+    .select('id, plan_code, session_key, phone_number')
+    .eq('user_id', id);
+
+  for (const bot of bots || []) {
+    const manager = bot.plan_code === 'vue_unique' ? baileysManager : botManager;
+    await manager.disconnectBot(bot.id, bot.session_key).catch((err) => {
+      console.error(`[admin] coupure bot ${bot.id}:`, err.message);
+    });
+  }
+
+  if (typeof baileysManager.releaseTermsHoldForUser === 'function') {
+    await baileysManager.releaseTermsHoldForUser(id).catch(() => {});
+  }
+  await trialPhoneGuard.releaseUserPhones(id);
+
+  const { error: authErr } = await supabase.auth.admin.deleteUser(id);
+  if (authErr) {
+    console.error('[admin] delete auth user:', authErr.message);
+    const { error: profileErr } = await supabase.from('profiles').delete().eq('id', id);
+    if (profileErr) {
+      return res.status(500).json({ error: 'Impossible de supprimer cet utilisateur.' });
+    }
+  }
+
+  res.json({ ok: true });
 };
 
 exports.setBlocked = async (req, res) => {

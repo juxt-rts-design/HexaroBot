@@ -98,6 +98,7 @@ export default function AdminDashboard() {
   const [sending, setSending] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [userQuery, setUserQuery] = useState('');
+  const [subQuery, setSubQuery] = useState('');
   const [extendDays, setExtendDays] = useState({});
 
   useBotStatusWatcher(bots);
@@ -204,6 +205,31 @@ export default function AdminDashboard() {
     });
   }
 
+  function deleteUser(u) {
+    setConfirm({
+      title: 'Supprimer cet utilisateur ?',
+      message: `${u.name || u.email} sera effacé : compte, bots, sessions WhatsApp et essai. S’il se réinscrit, ce sera un nouveau compte (nouvel essai).`,
+      danger: true,
+      confirmLabel: 'Supprimer définitivement',
+      busyKey: `user-del-${u.id}`,
+      onConfirm: () =>
+        run(`user-del-${u.id}`, async () => {
+          setConfirm(null);
+          try {
+            await api.delete(`/api/admin/users/${u.id}`);
+            await refresh();
+            push({ title: 'Utilisateur supprimé', message: u.email, tone: 'warn' });
+          } catch (err) {
+            push({
+              title: 'Suppression impossible',
+              message: err.response?.data?.error || err.message,
+              tone: 'danger',
+            });
+          }
+        }),
+    });
+  }
+
   function deleteBot(id) {
     setConfirm({
       title: 'Supprimer ce bot ?',
@@ -283,12 +309,26 @@ export default function AdminDashboard() {
   const filteredUsers = useMemo(() => {
     const q = userQuery.trim().toLowerCase();
     if (!q) return users;
-    return users.filter((u) => (
-      (u.name || '').toLowerCase().includes(q)
-      || (u.email || '').toLowerCase().includes(q)
-      || (u.role || '').toLowerCase().includes(q)
-    ));
+    const digits = q.replace(/\D/g, '');
+    return users.filter((u) => {
+      const hay = `${u.name || ''} ${u.email || ''} ${u.role || ''} ${(u.phones || []).join(' ')}`.toLowerCase();
+      if (hay.includes(q)) return true;
+      if (digits.length >= 4) {
+        return (u.phones || []).some((p) => String(p).replace(/\D/g, '').includes(digits));
+      }
+      return false;
+    });
   }, [users, userQuery]);
+
+  const filteredSubs = useMemo(() => {
+    const q = subQuery.trim().toLowerCase();
+    if (!q) return subscriptions;
+    return subscriptions.filter((s) => (
+      `${s.user_name || ''} ${s.user_email || ''} ${s.plan_name || ''} ${s.status || ''}`
+        .toLowerCase()
+        .includes(q)
+    ));
+  }, [subscriptions, subQuery]);
 
   const userStats = useMemo(() => ({
     total: users.length,
@@ -352,11 +392,27 @@ export default function AdminDashboard() {
             </div>
 
             <h3 className="admin-subhead">Abonnements</h3>
+            <div className="admin-toolbar">
+              <div className="admin-search">
+                <Icon name="search" size={16} />
+                <input
+                  type="search"
+                  placeholder="Rechercher un utilisateur, un e-mail…"
+                  value={subQuery}
+                  onChange={(e) => setSubQuery(e.target.value)}
+                />
+                {subQuery && (
+                  <button type="button" className="admin-search-clear" onClick={() => setSubQuery('')} title="Effacer">
+                    <Icon name="close" size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Utilisateur</th><th>Offre</th><th>Essai</th><th>Fin d’accès</th><th>Statut</th><th className="col-actions">Actions</th></tr></thead>
                 <tbody>
-                  {subscriptions.map((s) => (
+                  {filteredSubs.map((s) => (
                     <tr key={s.id}>
                       <td data-label="Utilisateur">{s.user_name} ({s.user_email})</td>
                       <td data-label="Offre">{s.plan_name}</td>
@@ -401,7 +457,7 @@ export default function AdminDashboard() {
                       </td>
                     </tr>
                   ))}
-                  {!subscriptions.length && <tr><td colSpan={6} className="empty">Aucun abonnement.</td></tr>}
+                  {!filteredSubs.length && <tr><td colSpan={6} className="empty">{subQuery.trim() ? `Aucun résultat pour « ${subQuery.trim()} ».` : 'Aucun abonnement.'}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -449,7 +505,7 @@ export default function AdminDashboard() {
               <div>
                 <h2>Utilisateurs</h2>
                 <p className="muted">
-                  Exempter = accès gratuit permanent. Bloquer = coupe les bots et refuse l&apos;accès.
+                  Exempter = accès gratuit. Bloquer = coupe les bots. Supprimer = efface le compte, les sessions WhatsApp et l’essai (une nouvelle inscription = nouveau user).
                 </p>
               </div>
               <div className="admin-stat-row">
@@ -461,13 +517,14 @@ export default function AdminDashboard() {
             </div>
 
             <div className="admin-toolbar">
-              <div className="admin-search">
+              <div className="admin-search admin-search-wide">
                 <Icon name="search" size={16} />
                 <input
                   type="search"
-                  placeholder="Rechercher un nom ou un e-mail…"
+                  placeholder="Rechercher un nom, un e-mail ou un numéro WhatsApp…"
                   value={userQuery}
                   onChange={(e) => setUserQuery(e.target.value)}
+                  autoComplete="off"
                 />
                 {userQuery && (
                   <button type="button" className="admin-search-clear" onClick={() => setUserQuery('')} title="Effacer">
@@ -495,6 +552,9 @@ export default function AdminDashboard() {
                         <div className="user-account-inner">
                           <strong className="user-name">{u.name || '—'}</strong>
                           <span className="user-email">{u.email}</span>
+                          {(u.phones || []).length > 0 && (
+                            <span className="user-email">{u.phones.join(' · ')}</span>
+                          )}
                         </div>
                       </td>
                       <td data-label="Rôle">
@@ -527,6 +587,14 @@ export default function AdminDashboard() {
                                 onClick={() => toggleBlock(u)}
                               >
                                 {isBusy(`block-${u.id}`) ? '…' : u.blocked ? 'Débloquer' : 'Bloquer'}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn secondary is-danger"
+                                disabled={isBusy(`user-del-${u.id}`)}
+                                onClick={() => deleteUser(u)}
+                              >
+                                {isBusy(`user-del-${u.id}`) ? '…' : 'Supprimer'}
                               </button>
                             </>
                           ) : (

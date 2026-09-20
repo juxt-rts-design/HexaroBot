@@ -179,7 +179,11 @@ async function assertLinkAllowed(botId, phoneRaw) {
   return { allowed: true };
 }
 
-/** Remplit la table depuis les bots déjà connectés (idempotent). */
+async function releaseUserPhones(userId) {
+  if (!userId) return;
+  const { error } = await supabase.from('whatsapp_trial_phones').delete().eq('user_id', userId);
+  if (error) console.error('[trial-phone] release:', error.message);
+}
 async function seedFromExistingBots() {
   const { data: bots, error } = await supabase
     .from('bots')
@@ -206,6 +210,7 @@ module.exports = {
   assertLinkAllowed,
   registerClaim,
   seedFromExistingBots,
+  releaseUserPhones,
   userHasPaidAccess,
   BLOCK_MSG,
 };

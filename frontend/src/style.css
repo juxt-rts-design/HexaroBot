@@ -605,7 +605,9 @@ textarea { width: 100%; resize: vertical; }
   padding: 8px 12px;
   color: var(--muted);
   max-width: 420px;
+  width: 100%;
 }
+.admin-search-wide { max-width: 560px; }
 .admin-search input {
   flex: 1;
   border: none;
