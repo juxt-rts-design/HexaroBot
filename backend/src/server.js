@@ -17,6 +17,7 @@ const botsRoutes = require('./routes/bots.routes');
 const adminRoutes = require('./routes/admin.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 const billing = require('./services/billing');
+const { startUploadsJanitor } = require('./services/uploadsJanitor');
 
 const app = express();
 const server = http.createServer(app);
@@ -102,6 +103,7 @@ botManager.restoreActiveSessions();
 baileysManager.init(io);
 baileysManager.restoreActiveSessions();
 billing.startBillingJob();
+startUploadsJanitor();
 
 const PORT = process.env.PORT || 5010;
 const publicBase = (process.env.PUBLIC_BASE_URL || process.env.FRONTEND_URL || `http://localhost:${PORT}`).replace(/\/$/, '');

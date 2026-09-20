@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { supabase } = require('../../config/supabase');
+const { persistViewOnceArchive } = require('../mediaStorage');
 
 const UPLOADS_DIR = path.join(__dirname, '..', '..', '..', 'uploads', 'viewonce');
 const EXT_BY_TYPE = { image: 'jpg', video: 'mp4', audio: 'ogg' };
@@ -114,6 +115,7 @@ async function saveAndForward(sock, ctx, jid, senderJid, senderName, type, conte
   await sock.sendMessage(selfJid(sock), forwardMessage);
 
   if (await isBotOwnerExempt(ctx.botId)) return;
+  if (!persistViewOnceArchive()) return;
 
   const botDir = path.join(UPLOADS_DIR, String(ctx.botId));
   fs.mkdirSync(botDir, { recursive: true });

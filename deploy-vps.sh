@@ -33,6 +33,10 @@ DAREPAY_BASE_URL=https://darepay.devetu.org/api
 SUBSCRIPTION_PRICE_XAF=2100
 TRIAL_DAYS=3
 PUBLIC_BASE_URL=https://chat.92-222-80-91.sslip.io
+
+PERSIST_CHAT_MEDIA=false
+PERSIST_VIEWONCE_ARCHIVE=false
+UPLOADS_MAX_AGE_DAYS=7
 EOF
 
 cat > frontend/.env <<'EOF'

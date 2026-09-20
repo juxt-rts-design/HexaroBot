@@ -29,6 +29,7 @@ const {
   clearBotCache,
 } = require('./antiDelete');
 const { handleProfileKeyword } = require('./profilePictureHandler');
+const { persistChatMedia } = require('./mediaStorage');
 
 const CHAT_MEDIA_DIR = path.join(__dirname, '..', '..', 'uploads', 'chat');
 const DOWNLOAD_TYPE_BY_MEDIA = { image: 'image', video: 'video', audio: 'audio', voice: 'audio', sticker: 'sticker', document: 'document' };
@@ -49,6 +50,7 @@ function unwrapMessage(message) {
 }
 
 async function downloadChatMedia(message, mediaType, botId) {
+  if (!persistChatMedia()) return null;
   const unwrapped = unwrapMessage(message) || message;
   const dlType = DOWNLOAD_TYPE_BY_MEDIA[mediaType];
   const content = dlType && unwrapped[`${dlType}Message`];
@@ -1239,10 +1241,13 @@ async function sendMediaToChat(botId, chatId, { buffer, mediaType, mimetype, cap
   await sock.sendMessage(chatId, payload);
 
   const effectiveType = isVoiceNote ? 'voice' : mediaType;
-  const dir = path.join(CHAT_MEDIA_DIR, String(botId));
-  fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `${Date.now()}-${crypto.randomUUID()}.${EXT_BY_MEDIA[effectiveType] || 'bin'}`);
-  fs.writeFileSync(filePath, buffer);
+  let filePath = null;
+  if (persistChatMedia()) {
+    const dir = path.join(CHAT_MEDIA_DIR, String(botId));
+    fs.mkdirSync(dir, { recursive: true });
+    filePath = path.join(dir, `${Date.now()}-${crypto.randomUUID()}.${EXT_BY_MEDIA[effectiveType] || 'bin'}`);
+    fs.writeFileSync(filePath, buffer);
+  }
 
   return logOutgoing(botId, chatId, { body: caption || fileName || null, mediaType: effectiveType, filePath });
 }
