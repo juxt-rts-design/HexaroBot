@@ -10,6 +10,7 @@ router.post('/broadcast', ctrl.broadcast);
 router.get('/subscriptions', ctrl.listSubscriptions);
 router.get('/payments', ctrl.listPayments);
 router.post('/subscriptions/:id/activate', ctrl.activateSubscription);
+router.post('/subscriptions/:id/extend', ctrl.extendSubscription);
 router.delete('/subscriptions/:id', ctrl.deleteSubscription);
 router.get('/bots', ctrl.listBots);
 router.delete('/bots/:id', ctrl.deleteBot);

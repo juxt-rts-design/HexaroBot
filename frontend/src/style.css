@@ -814,6 +814,32 @@ th {
   align-items: center;
   justify-content: flex-end;
 }
+.admin-sub-actions { max-width: 320px; }
+.admin-extend-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.admin-extend-days {
+  width: 4.2rem;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .empty { color: var(--muted); text-align: center; padding: 28px 8px; }
 
 header.topbar {

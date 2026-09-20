@@ -22,6 +22,22 @@ function paymentAgeMs(row) {
   return Number.isFinite(t) ? Date.now() - t : 0;
 }
 
+/** Passe en SUCCESS une seule fois (poll + callback DarePay) avant de prolonger l’abo. */
+async function claimPaymentSuccess(paymentId, patch) {
+  const { data: claimed, error } = await supabase
+    .from('payments')
+    .update({
+      ...patch,
+      updated_at: patch.updated_at || new Date().toISOString(),
+    })
+    .eq('id', paymentId)
+    .neq('status', 'SUCCESS')
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  return claimed;
+}
+
 function serializePayment(row, extra = {}) {
   return {
     reference: row.reference,
@@ -212,9 +228,13 @@ exports.getPaymentStatus = async (req, res) => {
           failure_reason: null,
           updated_at: new Date().toISOString(),
         };
-        await supabase.from('payments').update(next).eq('id', row.id);
-        await billing.applySuccessfulPayment({ ...row, ...next });
-        Object.assign(row, next);
+        const claimed = await claimPaymentSuccess(row.id, next);
+        if (claimed) {
+          await billing.applySuccessfulPayment(claimed);
+          Object.assign(row, claimed);
+        } else {
+          Object.assign(row, next);
+        }
       } else if (remoteStatus === 'FAILED') {
         const reason = payment.failure_reason || result.body?.message || 'Transaction échouée';
         const tooEarly = paymentAgeMs(row) < FAILED_GRACE_MS;
@@ -318,18 +338,32 @@ exports.hexapayCallback = async (req, res) => {
       return res.status(200).json({ received: true, ignored: true, reason: 'moov_ussd_grace' });
     }
 
+    if (status === 'SUCCESS') {
+      const patch = {
+        status: 'SUCCESS',
+        transaction_id: transaction_id || row.transaction_id,
+        darepay_payment_id: payment_id != null ? String(payment_id) : row.darepay_payment_id,
+        failure_reason: null,
+        callback_payload: payload,
+        updated_at: receivedAt,
+      };
+      const claimed = await claimPaymentSuccess(row.id, patch);
+      if (claimed) {
+        await billing.applySuccessfulPayment(claimed);
+      }
+      return res.status(200).json({ received: true, reference, transaction_id, applied: Boolean(claimed) });
+    }
+
     const patch = {
-      status: status === 'SUCCESS' || status === 'FAILED' ? status : row.status,
+      status: status === 'FAILED' ? 'FAILED' : row.status,
       transaction_id: transaction_id || row.transaction_id,
       darepay_payment_id: payment_id != null ? String(payment_id) : row.darepay_payment_id,
       failure_reason: failure_reason ?? row.failure_reason,
       callback_payload: payload,
       updated_at: receivedAt,
     };
-    await supabase.from('payments').update(patch).eq('id', row.id);
-
-    if (status === 'SUCCESS' && row.status !== 'SUCCESS') {
-      await billing.applySuccessfulPayment({ ...row, ...patch });
+    if (status === 'FAILED' && row.status !== 'SUCCESS') {
+      await supabase.from('payments').update(patch).eq('id', row.id).neq('status', 'SUCCESS');
     }
 
     return res.status(200).json({ received: true, reference, transaction_id });

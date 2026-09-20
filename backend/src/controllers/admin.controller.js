@@ -6,6 +6,7 @@ const botManager = require('../services/botManager');
 const baileysManager = require('../services/baileysManager');
 const { transcodeToOggOpus } = require('../services/audioTranscoder');
 const { pickBestChatName } = require('../utils/chatNames');
+const billing = require('../services/billing');
 
 exports.uploadMedia = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } }).single('file');
 
@@ -137,14 +138,37 @@ exports.activateSubscription = async (req, res) => {
   const { data: sub, error: findErr } = await supabase.from('subscriptions').select('*').eq('id', id).maybeSingle();
   if (findErr) return res.status(500).json({ error: findErr.message });
   if (!sub) return res.status(404).json({ error: 'Abonnement introuvable.' });
-  const durationMs = sub.period === 'week' ? 7 * 24 * 3600 * 1000 : 30 * 24 * 3600 * 1000;
-  const endsAt = new Date(Date.now() + durationMs).toISOString();
-  const { error } = await supabase
-    .from('subscriptions')
-    .update({ status: 'active', starts_at: new Date().toISOString(), ends_at: endsAt })
-    .eq('id', id);
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ ok: true, ends_at: endsAt });
+  const defaultDays = sub.period === 'week' ? 7 : billing.BILLING_MONTH_DAYS;
+  try {
+    const endsAt = await billing.extendSubscriptionDays(Number(id), defaultDays, { reason: 'admin' });
+    res.json({ ok: true, ends_at: endsAt });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+};
+
+exports.extendSubscription = async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: 'Identifiant invalide.' });
+  }
+  const rawDays = req.body?.days;
+  const rawMonths = req.body?.months;
+  let days = billing.BILLING_MONTH_DAYS;
+  if (rawDays != null && rawDays !== '') {
+    days = Number(rawDays);
+  } else if (rawMonths != null && rawMonths !== '') {
+    days = Number(rawMonths) * billing.BILLING_MONTH_DAYS;
+  }
+  if (!Number.isFinite(days) || days < 1 || days > 3650) {
+    return res.status(400).json({ error: 'Indique entre 1 et 3650 jours (ou des mois valides).' });
+  }
+  try {
+    const endsAt = await billing.extendSubscriptionDays(id, Math.round(days), { reason: 'admin' });
+    res.json({ ok: true, ends_at: endsAt, days_added: Math.round(days) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
 };
 
 exports.deleteSubscription = async (req, res) => {

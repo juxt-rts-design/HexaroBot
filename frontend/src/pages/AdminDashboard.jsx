@@ -98,6 +98,7 @@ export default function AdminDashboard() {
   const [sending, setSending] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [userQuery, setUserQuery] = useState('');
+  const [extendDays, setExtendDays] = useState({});
 
   useBotStatusWatcher(bots);
 
@@ -124,6 +125,26 @@ export default function AdminDashboard() {
   function activate(id) {
     return run(`activate-${id}`, async () => {
       await api.post(`/api/admin/subscriptions/${id}/activate`);
+      push({ title: 'Abonnement activé / prolongé', tone: 'ok' });
+      await refresh();
+    });
+  }
+
+  function extendSubscription(id) {
+    const days = Number(extendDays[id] ?? 30);
+    if (!Number.isFinite(days) || days < 1) {
+      push({ title: 'Nombre de jours invalide', tone: 'warn' });
+      return undefined;
+    }
+    return run(`extend-${id}`, async () => {
+      const { data } = await api.post(`/api/admin/subscriptions/${id}/extend`, { days });
+      push({
+        title: 'Accès prolongé',
+        message: data?.ends_at
+          ? `Jusqu’au ${new Date(data.ends_at).toLocaleDateString('fr-FR')} (+${data.days_added} j)`
+          : undefined,
+        tone: 'ok',
+      });
       await refresh();
     });
   }
@@ -343,12 +364,34 @@ export default function AdminDashboard() {
                       <td data-label="Fin d’accès">{s.ends_at ? new Date(s.ends_at).toLocaleDateString('fr-FR') : '—'}</td>
                       <td data-label="Statut"><span className={`badge ${s.status === 'active' ? 'connected' : 'qr_pending'}`}>{s.status}</span></td>
                       <td data-label="" className="actions-cell">
-                        <div className="actions-inner">
+                        <div className="actions-inner admin-sub-actions">
                         {s.status === 'pending_payment' && (
                           <button className="btn" disabled={isBusy(`activate-${s.id}`)} onClick={() => activate(s.id)}>
-                            {isBusy(`activate-${s.id}`) ? '...' : 'Activer'}
+                            {isBusy(`activate-${s.id}`) ? '...' : 'Activer 30 j'}
                           </button>
                         )}
+                        <label className="admin-extend-field">
+                          <span className="sr-only">Jours à ajouter</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={365}
+                            className="admin-extend-days"
+                            value={extendDays[s.id] ?? 30}
+                            onChange={(e) =>
+                              setExtendDays((prev) => ({ ...prev, [s.id]: e.target.value }))
+                            }
+                          />
+                          <span className="muted">j</span>
+                        </label>
+                        <button
+                          className="btn"
+                          disabled={isBusy(`extend-${s.id}`)}
+                          onClick={() => extendSubscription(s.id)}
+                          title="Prolonger sans paiement"
+                        >
+                          {isBusy(`extend-${s.id}`) ? '...' : 'Prolonger'}
+                        </button>
                         <button className="btn secondary" disabled={isBusy(`sub-del-${s.id}`)} onClick={() => deleteSubscription(s.id)}>
                           {isBusy(`sub-del-${s.id}`) ? '...' : 'Supprimer'}
                         </button>

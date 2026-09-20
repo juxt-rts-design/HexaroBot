@@ -258,50 +258,80 @@ async function resumeBotAfterPayment(bot, endsAtIso) {
   }
 }
 
-async function applySuccessfulPayment(paymentRow) {
-  const { data: bot } = await supabase
-    .from('bots')
+function subscriptionBaseDate(sub, now = new Date()) {
+  if (sub?.ends_at) {
+    const end = new Date(sub.ends_at);
+    if (end > now) return end;
+  }
+  return now;
+}
+
+/** Prolonge l’abonnement (depuis la fin actuelle si encore valide) et réactive le bot si besoin. */
+async function extendSubscriptionDays(subscriptionId, days, { reason = 'payment' } = {}) {
+  const add = Math.max(1, Math.min(Number(days) || BILLING_MONTH_DAYS, 3650));
+  const { data: sub, error: subErr } = await supabase
+    .from('subscriptions')
     .select('*')
-    .eq('id', paymentRow.bot_id)
+    .eq('id', subscriptionId)
     .maybeSingle();
+  if (subErr) throw subErr;
+  if (!sub) {
+    const err = new Error('Abonnement introuvable.');
+    err.status = 404;
+    throw err;
+  }
 
   const now = new Date();
-  let base = now;
-  if (bot?.subscription_id) {
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('ends_at, status')
-      .eq('id', bot.subscription_id)
-      .maybeSingle();
-    if (sub?.ends_at && sub.status === 'active' && new Date(sub.ends_at) > now) {
-      base = new Date(sub.ends_at);
-    }
-  }
-  const endsAt = addDays(base, BILLING_MONTH_DAYS).toISOString();
+  const endsAt = addDays(subscriptionBaseDate(sub, now), add).toISOString();
 
-  if (bot) {
-    await resumeBotAfterPayment(bot, endsAt);
-    setTimeout(() => {
-      notifyBot(
-        bot.id,
-        bot.plan_code,
-        `✅ Paiement reçu (${priceXaf()} FCFA).\nTon HexaroBot est prolongé jusqu'au ${new Date(endsAt).toLocaleDateString('fr-FR')}.\nMerci !`
-      );
-    }, 4000);
-  } else if (paymentRow.subscription_id) {
+  const { data: bots } = await supabase.from('bots').select('*').eq('subscription_id', subscriptionId);
+  if (bots?.length) {
+    for (const bot of bots) {
+      await resumeBotAfterPayment(bot, endsAt);
+      if (reason === 'payment') {
+        setTimeout(() => {
+          notifyBot(
+            bot.id,
+            bot.plan_code,
+            `✅ Paiement reçu (${priceXaf()} FCFA).\nTon HexaroBot est prolongé jusqu'au ${new Date(endsAt).toLocaleDateString('fr-FR')}.\nMerci !`
+          );
+        }, 4000);
+      } else if (reason === 'admin') {
+        setTimeout(() => {
+          notifyBot(
+            bot.id,
+            bot.plan_code,
+            `✅ Accès prolongé par l’équipe Hexaro jusqu'au ${new Date(endsAt).toLocaleDateString('fr-FR')}.`
+          );
+        }, 2000);
+      }
+    }
+  } else {
     await supabase
       .from('subscriptions')
       .update({
         status: 'active',
         is_trial: false,
-        amount: priceXaf(),
+        amount: reason === 'payment' ? priceXaf() : sub.amount,
         ends_at: endsAt,
         billing_notices: {},
       })
-      .eq('id', paymentRow.subscription_id);
+      .eq('id', subscriptionId);
   }
 
   return endsAt;
+}
+
+async function applySuccessfulPayment(paymentRow) {
+  const subId = paymentRow.subscription_id;
+  const { data: bot } = await supabase
+    .from('bots')
+    .select('subscription_id')
+    .eq('id', paymentRow.bot_id)
+    .maybeSingle();
+  const subscriptionId = bot?.subscription_id || subId;
+  if (!subscriptionId) return null;
+  return extendSubscriptionDays(subscriptionId, BILLING_MONTH_DAYS, { reason: 'payment' });
 }
 
 function payPageUrl() {
@@ -415,8 +445,10 @@ module.exports = {
   ensureSubscriptionForBot,
   getBillingSnapshot,
   applySuccessfulPayment,
+  extendSubscriptionDays,
   parseAmount,
   startBillingJob,
   processBillingTick,
   suspendBot,
+  BILLING_MONTH_DAYS,
 };
