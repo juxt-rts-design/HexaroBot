@@ -64,6 +64,9 @@ exports.deleteUser = async (req, res) => {
     .select('id, plan_code, session_key, phone_number')
     .eq('user_id', id);
 
+  const phones = (bots || []).map((b) => b.phone_number).filter(Boolean);
+  await trialPhoneGuard.releaseUserPhones(id, phones);
+
   for (const bot of bots || []) {
     const manager = bot.plan_code === 'vue_unique' ? baileysManager : botManager;
     await manager.disconnectBot(bot.id, bot.session_key).catch((err) => {
@@ -74,7 +77,7 @@ exports.deleteUser = async (req, res) => {
   if (typeof baileysManager.releaseTermsHoldForUser === 'function') {
     await baileysManager.releaseTermsHoldForUser(id).catch(() => {});
   }
-  await trialPhoneGuard.releaseUserPhones(id);
+  await trialPhoneGuard.releaseUserPhones(id, phones);
 
   const { error: authErr } = await supabase.auth.admin.deleteUser(id);
   if (authErr) {
@@ -242,11 +245,16 @@ exports.extendSubscription = async (req, res) => {
 
 exports.deleteSubscription = async (req, res) => {
   const { id } = req.params;
-  const { data: bots } = await supabase.from('bots').select('id, plan_code, session_key').eq('subscription_id', id);
+  const { data: bots } = await supabase
+    .from('bots')
+    .select('id, plan_code, session_key, phone_number, user_id')
+    .eq('subscription_id', id);
+  const phones = (bots || []).map((b) => b.phone_number).filter(Boolean);
   for (const bot of bots || []) {
     const manager = bot.plan_code === 'vue_unique' ? baileysManager : botManager;
     await manager.disconnectBot(bot.id, bot.session_key).catch(() => {});
   }
+  await trialPhoneGuard.deleteClaimsByPhones(phones);
   const { error, count } = await supabase.from('subscriptions').delete({ count: 'exact' }).eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   if (!count) return res.status(404).json({ error: 'Abonnement introuvable.' });
@@ -271,11 +279,12 @@ exports.deleteBot = async (req, res) => {
   const { id } = req.params;
   const { data: bot, error: findErr } = await supabase
     .from('bots')
-    .select('id, plan_code, session_key')
+    .select('id, plan_code, session_key, phone_number')
     .eq('id', id)
     .maybeSingle();
   if (findErr) return res.status(500).json({ error: findErr.message });
   if (!bot) return res.status(404).json({ error: 'Bot introuvable.' });
+  await trialPhoneGuard.deleteClaimsByPhones([bot.phone_number].filter(Boolean));
   const manager = bot.plan_code === 'vue_unique' ? baileysManager : botManager;
   await manager.disconnectBot(bot.id, bot.session_key).catch(() => {});
   const { error } = await supabase.from('bots').delete().eq('id', id);

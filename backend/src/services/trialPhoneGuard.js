@@ -55,19 +55,54 @@ async function userHasPaidAccess(userId) {
   );
 }
 
+/** Toutes les formes possibles d’un même numéro (QR, pairing, base). */
+function phoneKeys(raw) {
+  const n = normalizeWaPhone(raw);
+  const digits = String(raw || '').replace(/\D/g, '');
+  const keys = new Set();
+  if (n) keys.add(n);
+  if (digits) keys.add(digits);
+  if (n.startsWith('241') && n.length >= 11) {
+    const local = n.slice(3);
+    keys.add(local);
+    keys.add(`0${local}`);
+    keys.add(`2410${local}`);
+  }
+  return [...keys].filter(Boolean);
+}
+
 async function getClaim(phone) {
-  const key = normalizeWaPhone(phone);
-  if (!key) return null;
+  const keys = phoneKeys(phone);
+  if (!keys.length) return null;
   const { data, error } = await supabase
     .from('whatsapp_trial_phones')
     .select('*')
-    .eq('phone', key)
-    .maybeSingle();
+    .in('phone', keys)
+    .limit(1);
   if (error) {
     console.error('[trial-phone] read:', error.message);
     return null;
   }
-  return data;
+  return data?.[0] || null;
+}
+
+async function deleteClaimsByPhones(phones) {
+  const keys = [...new Set((phones || []).flatMap((p) => phoneKeys(p)))];
+  if (!keys.length) return;
+  const { error } = await supabase.from('whatsapp_trial_phones').delete().in('phone', keys);
+  if (error) console.error('[trial-phone] delete phones:', error.message);
+}
+
+/** true si un autre compte a encore ce numéro sur un bot. */
+async function isClaimStillHeld(claim, key) {
+  if (!claim?.user_id) return false;
+  const { data: profile } = await supabase.from('profiles').select('id').eq('id', claim.user_id).maybeSingle();
+  if (!profile) return false;
+  const { data: bots } = await supabase
+    .from('bots')
+    .select('phone_number')
+    .eq('user_id', claim.user_id);
+  return (bots || []).some((b) => phoneKeys(b.phone_number).includes(key) || normalizeWaPhone(b.phone_number) === key);
 }
 
 async function registerClaim(phone, userId, botId) {
@@ -99,14 +134,18 @@ async function checkPhoneForUser(phoneRaw, userId, { onLink = false, botId = nul
 
   const claim = await getClaim(key);
   if (claim && claim.user_id !== userId) {
-    if (await userHasPaidAccess(userId)) {
+    const stillHeld = await isClaimStillHeld(claim, key);
+    if (!stillHeld) {
+      await deleteClaimsByPhones([key, claim.phone]);
+    } else if (await userHasPaidAccess(userId)) {
       if (onLink) {
         console.log(`[trial-phone] transfert ${key} → user ${userId} (payé)`);
         await registerClaim(key, userId, botId);
       }
       return { allowed: true };
+    } else {
+      return { allowed: false, message: BLOCK_MSG };
     }
-    return { allowed: false, message: BLOCK_MSG };
   }
 
   if (onLink) {
@@ -179,10 +218,18 @@ async function assertLinkAllowed(botId, phoneRaw) {
   return { allowed: true };
 }
 
-async function releaseUserPhones(userId) {
+async function releaseUserPhones(userId, extraPhones = []) {
   if (!userId) return;
+  const { data: claims } = await supabase.from('whatsapp_trial_phones').select('phone').eq('user_id', userId);
+  const { data: bots } = await supabase.from('bots').select('phone_number').eq('user_id', userId);
+  const phones = [
+    ...extraPhones,
+    ...(claims || []).map((c) => c.phone),
+    ...(bots || []).map((b) => b.phone_number),
+  ];
   const { error } = await supabase.from('whatsapp_trial_phones').delete().eq('user_id', userId);
-  if (error) console.error('[trial-phone] release:', error.message);
+  if (error) console.error('[trial-phone] release user:', error.message);
+  await deleteClaimsByPhones(phones);
 }
 async function seedFromExistingBots() {
   const { data: bots, error } = await supabase
@@ -211,6 +258,7 @@ module.exports = {
   registerClaim,
   seedFromExistingBots,
   releaseUserPhones,
+  deleteClaimsByPhones,
   userHasPaidAccess,
   BLOCK_MSG,
 };
