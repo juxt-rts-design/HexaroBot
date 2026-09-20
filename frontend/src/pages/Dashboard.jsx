@@ -109,7 +109,7 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    if (autoPayRef.current || user.exempt || !bots.length) return;
+    if (autoPayRef.current || user.exempt || user.terms_required || !bots.length) return;
     const urgent = bots.find(
       (b) =>
         b.status === 'suspended' ||

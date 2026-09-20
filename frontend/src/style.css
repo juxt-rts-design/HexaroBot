@@ -873,7 +873,7 @@ th {
 }
 
 .terms-overlay {
-  z-index: 60;
+  z-index: 400;
   backdrop-filter: blur(4px);
 }
 .terms-modal {

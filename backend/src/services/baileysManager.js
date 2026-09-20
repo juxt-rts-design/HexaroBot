@@ -190,6 +190,33 @@ function isLiveConnected(botId) {
   return Boolean(getSock(botId)?.user?.id);
 }
 
+function jidUser(jid) {
+  if (!jid) return '';
+  return String(jid).split('@')[0].split(':')[0];
+}
+
+/** Comptes LID : Baileys ne met parfois pas key.fromMe sur les messages du propriétaire. */
+function messageIsFromMe(sock, msg) {
+  if (msg?.key?.fromMe) return true;
+  const me = sock?.user;
+  if (!me) return false;
+  const mine = new Set(
+    [me.id, me.lid, me.jid, me.phoneNumber, me.wnid]
+      .filter(Boolean)
+      .map(jidUser)
+      .filter(Boolean)
+  );
+  if (!mine.size) return false;
+  const who = [
+    msg.key.participant,
+    msg.key.participantPn,
+    msg.key.participantAlt,
+    msg.key.senderPn,
+    msg.key.senderLid,
+  ].filter(Boolean);
+  return who.some((id) => mine.has(jidUser(id)));
+}
+
 function isTermsHeld(botId) {
   return termsHoldBots.has(Number(botId)) || termsHoldBots.has(botId);
 }
@@ -560,11 +587,9 @@ async function runStartBot({ botId, sessionKey, force = false }) {
       lastPairing.delete(botId);
       pairingInFlight.delete(botId);
       reconnectAttempts.delete(botId);
-      termsHoldBots.add(Number(botId));
       const phone = sock.user?.id?.split(':')[0] || sock.user?.id?.split('@')[0] || null;
       const link = await trialPhoneGuard.assertLinkAllowed(botId, phone);
       if (!link.allowed) {
-        termsHoldBots.delete(Number(botId));
         lastLinkBlock.set(Number(botId), link.message);
         emit(botId, 'link-blocked', { error: link.message });
         await killSocket(botId);
@@ -578,8 +603,7 @@ async function runStartBot({ botId, sessionKey, force = false }) {
       const { data: owner } = await supabase.from('bots').select('user_id').eq('id', botId).maybeSingle();
       if (owner?.user_id && (await userTerms.needsAcceptance(owner.user_id))) {
         emit(botId, 'terms-required', { required: true });
-      } else {
-        termsHoldBots.delete(Number(botId));
+        console.log(`[terms] bot ${botId} connecté — CGU à accepter (commandes actives)`);
       }
     }
 
@@ -628,7 +652,6 @@ async function runStartBot({ botId, sessionKey, force = false }) {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (isTermsHeld(botId)) return;
     if (process.env.DEBUG_VIEWONCE === 'true') {
       console.log(`[baileys bot ${botId}] messages.upsert type=${type} count=${messages.length}`);
     }
@@ -667,7 +690,8 @@ async function runStartBot({ botId, sessionKey, force = false }) {
 
       // Comme Juxt : les réponses fromMe (ex. -send) arrivent souvent en type "append".
       // Sans ça, la citation de vue unique n'est jamais traitée.
-      const fromMe = Boolean(msg.key.fromMe);
+      const fromMe = messageIsFromMe(sock, msg);
+      if (fromMe && msg.key && !msg.key.fromMe) msg.key.fromMe = true;
       if (type !== 'notify' && !(type === 'append' && fromMe)) continue;
 
       const messageText = getMessageText(msg);
@@ -742,7 +766,6 @@ async function runStartBot({ botId, sessionKey, force = false }) {
   });
 
   sock.ev.on('messages.update', async (updates) => {
-    if (isTermsHeld(botId)) return;
     try {
       await handleRevokeUpdates(sock, botId, updates);
     } catch (err) {
@@ -751,7 +774,6 @@ async function runStartBot({ botId, sessionKey, force = false }) {
   });
 
   sock.ev.on('messages.reaction', async (reactions) => {
-    if (isTermsHeld(botId)) return;
     try {
       for (const item of reactions || []) {
         await handleStatusReaction(sock, botId, item);
@@ -900,16 +922,7 @@ async function releaseTermsHoldForUser(userId) {
 }
 
 async function syncTermsHoldFromDb() {
-  const { data: bots } = await supabase
-    .from('bots')
-    .select('id, user_id, status')
-    .eq('status', 'connected')
-    .eq('plan_code', 'vue_unique');
-  for (const bot of bots || []) {
-    if (await userTerms.needsAcceptance(bot.user_id)) {
-      termsHoldBots.add(Number(bot.id));
-    }
-  }
+  termsHoldBots.clear();
 }
 
 async function restoreActiveSessions() {
