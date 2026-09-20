@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { BrandMark } from '../components/Icons';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { publicErrorMessage } from '../utils/publicError';
 
 function loginPathFromNext(next) {
   if (String(next || '').startsWith('/admin')) return '/admin/login';
@@ -85,7 +86,7 @@ export default function AuthCallback() {
       } catch (err) {
         if (cancelled) return;
         setFailed(true);
-        setMessage(err.response?.data?.error || err.message || 'Échec de la connexion Google.');
+        setMessage(publicErrorMessage(err, 'Échec de la connexion Google.'));
       }
     })();
 

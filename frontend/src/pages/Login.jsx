@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { BrandMark } from '../components/Icons';
 import PasswordField from '../components/PasswordField';
 import GoogleAuthButton from '../components/GoogleAuthButton';
-import { withLoginGuard } from '../utils/authGuard';
+import { authErrorMessage, withLoginGuard } from '../utils/authGuard';
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -24,7 +24,7 @@ export default function Login() {
     try {
       await withLoginGuard(email, 'user', () => login(email.trim(), password));
     } catch (err) {
-      setError(err.message || 'Mot de passe ou email incorrect.');
+      setError(authErrorMessage(err));
     } finally {
       setBusy(false);
     }

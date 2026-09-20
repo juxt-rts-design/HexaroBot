@@ -1,6 +1,7 @@
 const { supabase } = require('../config/supabase');
 const { darepayFetch, extractPayment } = require('../services/darepay');
 const billing = require('../services/billing');
+const { mapPublicError } = require('../utils/publicError');
 
 const OPERATORS = new Set(['AIRTEL_MONEY', 'MOOV_MONEY']);
 /** MoBiCash (Libertis) met parfois FAILED le temps que le USSD arrive — ne pas figer trop tôt. */
@@ -46,7 +47,9 @@ function serializePayment(row, extra = {}) {
     status: row.status,
     operator_code: row.operator_code,
     transaction_id: row.transaction_id,
-    failure_reason: row.failure_reason,
+    failure_reason: row.failure_reason
+      ? mapPublicError(row.failure_reason, 'La transaction n’a pas abouti.')
+      : null,
     ...extra,
   };
 }

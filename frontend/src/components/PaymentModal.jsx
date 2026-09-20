@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
 import { Icon } from './Icons';
+import { publicErrorMessage } from '../utils/publicError';
 
 const OPERATORS = {
   airtel: {
@@ -116,7 +117,9 @@ export default function PaymentModal({
         } else if (st === 'FAILED') {
           stopPoll();
           setPhase('failed');
-          setMessage(res.data?.payment?.failure_reason || 'La transaction n’a pas abouti.');
+          setMessage(
+            publicErrorMessage(res.data?.payment?.failure_reason, 'La transaction n’a pas abouti.')
+          );
         }
       } catch {
         /* ignore */
@@ -158,7 +161,7 @@ export default function PaymentModal({
       if (ref) startPoll(ref, operator);
     } catch (err) {
       setPhase('failed');
-      setMessage(err.response?.data?.error || err.message || 'Impossible d’initier le paiement.');
+      setMessage(publicErrorMessage(err, 'Impossible d’initier le paiement.'));
     } finally {
       setBusy(false);
     }

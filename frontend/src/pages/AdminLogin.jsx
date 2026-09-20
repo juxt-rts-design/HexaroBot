@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { BrandMark, Icon } from '../components/Icons';
 import PasswordField from '../components/PasswordField';
 import GoogleAuthButton from '../components/GoogleAuthButton';
-import { withLoginGuard } from '../utils/authGuard';
+import { authErrorMessage, withLoginGuard } from '../utils/authGuard';
 
 export default function AdminLogin() {
   const { user, login } = useAuth();
@@ -27,7 +27,7 @@ export default function AdminLogin() {
         setError('Accès réservé aux administrateurs.');
       }
     } catch (err) {
-      setError(err.message || 'Mot de passe ou email incorrect.');
+      setError(authErrorMessage(err));
     } finally {
       setBusy(false);
     }

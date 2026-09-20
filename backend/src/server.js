@@ -19,6 +19,7 @@ const paymentsRoutes = require('./routes/payments.routes');
 const billing = require('./services/billing');
 const { startUploadsJanitor } = require('./services/uploadsJanitor');
 const trialPhoneGuard = require('./services/trialPhoneGuard');
+const { patchJsonErrors } = require('./utils/publicError');
 
 const app = express();
 const server = http.createServer(app);
@@ -46,6 +47,7 @@ app.use((_req, res, next) => {
 app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
+app.use(patchJsonErrors);
 
 app.use('/api', rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false }));
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false });

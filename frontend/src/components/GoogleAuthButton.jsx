@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { publicErrorMessage } from '../utils/publicError';
 
 /**
  * Bouton Connexion Google (logo officiel + OAuth Supabase).
@@ -18,7 +19,7 @@ export default function GoogleAuthButton({ next = '/dashboard', className = '' }
       // Redirection Google — le busy reste jusqu'au unload
     } catch (err) {
       setBusy(false);
-      setError(err.message || 'Connexion Google impossible. Vérifie que le provider est activé sur Supabase.');
+      setError(publicErrorMessage(err, 'Connexion Google impossible. Réessaie.'));
     }
   }
 

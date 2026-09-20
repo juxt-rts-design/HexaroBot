@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { BrandMark } from '../components/Icons';
 import PasswordField from '../components/PasswordField';
 import GoogleAuthButton from '../components/GoogleAuthButton';
+import { authErrorMessage } from '../utils/authGuard';
 
 export default function Register() {
   const { user, register } = useAuth();
@@ -27,7 +28,7 @@ export default function Register() {
         setInfo('Compte créé. Vérifie ton email si la confirmation est activée, puis connecte-toi.');
       }
     } catch (err) {
-      setError(err.message || 'Inscription impossible.');
+      setError(authErrorMessage(err) || 'Inscription impossible.');
     } finally {
       setBusy(false);
     }
