@@ -107,6 +107,7 @@ function describeMessage(message) {
 // fait via une commande ".save" en réponse au message cité, WhatsApp ne
 // livrant jamais le contenu d'une vue-unique en direct à un appareil lié.
 const SESSIONS_DIR = path.join(__dirname, '..', '..', 'sessions-baileys');
+const VERSION_CACHE = path.join(SESSIONS_DIR, '.wa-version.json');
 
 const activeSockets = new Map(); // botId -> socket
 const lastQr = new Map();
@@ -227,14 +228,44 @@ async function waitForUnregisteredSock(botId, ms = 25000) {
 
 async function resolveWaVersion() {
   try {
-    return await Promise.race([
+    const result = await Promise.race([
       fetchLatestBaileysVersion(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout version WA')), 8000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout version WA')), 25000)),
     ]);
+    if (result?.version) {
+      try {
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+        fs.writeFileSync(VERSION_CACHE, JSON.stringify({ version: result.version, at: Date.now() }));
+      } catch { /* cache optionnel */ }
+      console.log(`[baileys] version WA ${result.version.join('.')}`);
+    }
+    return result;
   } catch (err) {
-    console.warn('[baileys] version WA indisponible, fallback :', err.message);
-    return { version: [2, 3000, 1027934701], isLatest: false };
+    try {
+      const cached = JSON.parse(fs.readFileSync(VERSION_CACHE, 'utf8'));
+      if (Array.isArray(cached?.version) && cached.version.length >= 3) {
+        console.warn(`[baileys] version cache ${cached.version.join('.')} (${err.message})`);
+        return { version: cached.version, isLatest: false };
+      }
+    } catch { /* pas de cache */ }
+    // Ne pas forcer une vieille version : WhatsApp affiche alors « Couldn't link device ».
+    console.warn('[baileys] version distante indisponible, défaut du paquet Baileys :', err.message);
+    return { version: null, isLatest: false };
   }
+}
+
+function disconnectLabel(statusCode, message) {
+  const map = {
+    [DisconnectReason.loggedOut]: 'WhatsApp a retiré l’appareil lié (401) — il faut re-scanner',
+    [DisconnectReason.timedOut]: 'Timeout socket/QR (408)',
+    [DisconnectReason.connectionClosed]: 'Connexion fermée (428)',
+    [DisconnectReason.connectionLost]: 'Connexion perdue',
+    [DisconnectReason.connectionReplaced]: 'Session remplacée sur un autre appareil (440)',
+    [DisconnectReason.badSession]: 'Session corrompue (500)',
+    [DisconnectReason.restartRequired]: 'Redémarrage WhatsApp (515, normal après scan)',
+    [DisconnectReason.unavailableService]: 'Service WhatsApp indisponible (503)',
+  };
+  return map[statusCode] || `code=${statusCode} ${message || ''}`.trim();
 }
 
 /**
@@ -473,15 +504,17 @@ async function runStartBot({ botId, sessionKey, force = false }) {
 
     sock = makeWASocket({
       auth: state,
-      version,
+      ...(version ? { version } : {}),
       logger: pino({ level: 'silent' }),
       printQRInTerminal: false,
       browser: Browsers.ubuntu('Chrome'),
-      syncFullHistory: true,
-      markOnlineOnConnect: true,
-      shouldSyncHistoryMessage: () => true,
+      // syncFullHistory + markOnline font rater le scan (« Couldn't link device »)
+      // et font ressembler le bot à un client non officiel → déconnexion 401.
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      shouldSyncHistoryMessage: () => false,
       connectTimeoutMs: 60_000,
-      keepAliveIntervalMs: 15_000,
+      keepAliveIntervalMs: 25_000,
     });
     activeSockets.set(botId, sock);
     sock.ev.on('creds.update', saveCreds);
@@ -513,25 +546,32 @@ async function runStartBot({ botId, sessionKey, force = false }) {
     if (connection === 'close') {
       activeSockets.delete(botId);
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      console.error(
-        `[baileys bot ${botId}] connexion fermée, statusCode=${statusCode}, message=${lastDisconnect?.error?.message}`
-      );
+      const why = disconnectLabel(statusCode, lastDisconnect?.error?.message);
+      console.error(`[baileys bot ${botId}] déconnecté : ${why}`);
 
       const wasConnected = lastStatus.get(botId)?.status === 'connected';
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
       const isBadSession = statusCode === DisconnectReason.badSession;
+      const isReplaced = statusCode === DisconnectReason.connectionReplaced;
       const attempt = (reconnectAttempts.get(botId) || 0) + 1;
       reconnectAttempts.set(botId, attempt);
 
-      const qrRetriesLeft = !wasConnected && attempt <= 8;
+      const qrPhase = lastStatus.get(botId)?.status === 'qr_pending' || lastQr.has(botId);
+      const qrRetriesLeft = qrPhase && attempt <= 6;
       const liveRetriesLeft = wasConnected && attempt <= 30;
       const shouldRetry =
         !isLoggedOut &&
         !isBadSession &&
+        !isReplaced &&
         (statusCode === DisconnectReason.restartRequired || liveRetriesLeft || qrRetriesLeft);
 
       if (shouldRetry) {
-        const delay = statusCode === DisconnectReason.restartRequired ? 1000 : Math.min(attempt * 1500, 12000);
+        const delay = statusCode === DisconnectReason.restartRequired
+          ? 1200
+          : qrPhase
+            ? 4000
+            : Math.min(attempt * 2000, 15000);
+        console.log(`[baileys bot ${botId}] relance dans ${delay}ms (essai ${attempt})`);
         setTimeout(() => {
           startBot({ botId, sessionKey }).catch((err) =>
             console.error(`Échec reconnexion auto bot ${botId}:`, err.message)
@@ -823,6 +863,7 @@ async function restoreActiveSessions() {
     const live = bot.status === 'connected' || bot.status === 'qr_pending';
     const restorable = bot.status === 'disconnected' && bot.phone_number && sessionHasCreds(bot.session_key);
     if (!live && !restorable) continue;
+    console.log(`[baileys] restore bot ${bot.id} status=${bot.status} phone=${bot.phone_number || '-'}`);
     startBot({ botId: bot.id, sessionKey: bot.session_key }).catch((err) =>
       console.error(`Échec restauration bot ${bot.id}:`, err.message)
     );
