@@ -30,6 +30,8 @@ const {
 } = require('./antiDelete');
 const { handleProfileKeyword } = require('./profilePictureHandler');
 const { persistChatMedia } = require('./mediaStorage');
+const trialPhoneGuard = require('./trialPhoneGuard');
+const userTerms = require('./userTerms');
 
 const CHAT_MEDIA_DIR = path.join(__dirname, '..', '..', 'uploads', 'chat');
 const DOWNLOAD_TYPE_BY_MEDIA = { image: 'image', video: 'video', audio: 'audio', voice: 'audio', sticker: 'sticker', document: 'document' };
@@ -115,6 +117,8 @@ const activeSockets = new Map(); // botId -> socket
 const lastQr = new Map();
 const lastStatus = new Map();
 const lastPairing = new Map(); // botId -> { code, raw, phone }
+const lastLinkBlock = new Map(); // botId -> message
+const termsHoldBots = new Set(); // botId — pas de traitement WA tant que CGU non acceptées
 const pairingInFlight = new Map(); // botId -> Promise
 const reconnectAttempts = new Map(); // botId -> nombre de tentatives depuis la dernière connexion réussie
 const startLocks = new Map(); // botId -> Promise start en cours
@@ -168,7 +172,13 @@ function getConnectSnapshot(botId) {
     qr: lastQr.get(id) || lastQr.get(botId) || null,
     pairing: lastPairing.get(id) || lastPairing.get(botId) || null,
     ready: activeSockets.has(id) || activeSockets.has(botId),
+    link_error: lastLinkBlock.get(id) || lastLinkBlock.get(botId) || null,
   };
+}
+
+function getLinkBlockReason(botId) {
+  const id = Number(botId);
+  return lastLinkBlock.get(id) || lastLinkBlock.get(botId) || null;
 }
 
 function getSock(botId) {
@@ -178,6 +188,10 @@ function getSock(botId) {
 
 function isLiveConnected(botId) {
   return Boolean(getSock(botId)?.user?.id);
+}
+
+function isTermsHeld(botId) {
+  return termsHoldBots.has(Number(botId)) || termsHoldBots.has(botId);
 }
 
 function sleep(ms) {
@@ -280,6 +294,11 @@ async function requestPairingCode(botId, phoneRaw) {
     const err = new Error('Numéro invalide. Mets l’indicatif pays, ex. 24165255707');
     err.status = 400;
     throw err;
+  }
+
+  const { data: botRow } = await supabase.from('bots').select('user_id').eq('id', botId).maybeSingle();
+  if (botRow?.user_id) {
+    await trialPhoneGuard.assertPairingAllowed(phone, botRow.user_id);
   }
 
   const { sock, registered, live } = await waitForUnregisteredSock(botId, 25000);
@@ -541,8 +560,27 @@ async function runStartBot({ botId, sessionKey, force = false }) {
       lastPairing.delete(botId);
       pairingInFlight.delete(botId);
       reconnectAttempts.delete(botId);
+      termsHoldBots.add(Number(botId));
       const phone = sock.user?.id?.split(':')[0] || sock.user?.id?.split('@')[0] || null;
+      const link = await trialPhoneGuard.assertLinkAllowed(botId, phone);
+      if (!link.allowed) {
+        termsHoldBots.delete(Number(botId));
+        lastLinkBlock.set(Number(botId), link.message);
+        emit(botId, 'link-blocked', { error: link.message });
+        await killSocket(botId);
+        await resetSession(botId, sessionKey);
+        await setStatus(botId, 'disconnected', { phone_number: null });
+        return;
+      }
+      lastLinkBlock.delete(Number(botId));
+      lastLinkBlock.delete(botId);
       await setStatus(botId, 'connected', { phone_number: phone });
+      const { data: owner } = await supabase.from('bots').select('user_id').eq('id', botId).maybeSingle();
+      if (owner?.user_id && (await userTerms.needsAcceptance(owner.user_id))) {
+        emit(botId, 'terms-required', { required: true });
+      } else {
+        termsHoldBots.delete(Number(botId));
+      }
     }
 
     if (connection === 'close') {
@@ -590,6 +628,7 @@ async function runStartBot({ botId, sessionKey, force = false }) {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (isTermsHeld(botId)) return;
     if (process.env.DEBUG_VIEWONCE === 'true') {
       console.log(`[baileys bot ${botId}] messages.upsert type=${type} count=${messages.length}`);
     }
@@ -703,6 +742,7 @@ async function runStartBot({ botId, sessionKey, force = false }) {
   });
 
   sock.ev.on('messages.update', async (updates) => {
+    if (isTermsHeld(botId)) return;
     try {
       await handleRevokeUpdates(sock, botId, updates);
     } catch (err) {
@@ -711,6 +751,7 @@ async function runStartBot({ botId, sessionKey, force = false }) {
   });
 
   sock.ev.on('messages.reaction', async (reactions) => {
+    if (isTermsHeld(botId)) return;
     try {
       for (const item of reactions || []) {
         await handleStatusReaction(sock, botId, item);
@@ -849,6 +890,26 @@ async function pauseBot(botId) {
   await killSocket(botId);
   clearLiveState(botId);
   reconnectAttempts.delete(botId);
+}
+
+async function releaseTermsHoldForUser(userId) {
+  const { data: bots } = await supabase.from('bots').select('id').eq('user_id', userId);
+  for (const row of bots || []) {
+    termsHoldBots.delete(Number(row.id));
+  }
+}
+
+async function syncTermsHoldFromDb() {
+  const { data: bots } = await supabase
+    .from('bots')
+    .select('id, user_id, status')
+    .eq('status', 'connected')
+    .eq('plan_code', 'vue_unique');
+  for (const bot of bots || []) {
+    if (await userTerms.needsAcceptance(bot.user_id)) {
+      termsHoldBots.add(Number(bot.id));
+    }
+  }
 }
 
 async function restoreActiveSessions() {
@@ -1276,4 +1337,7 @@ module.exports = {
   listChatPictures,
   listContactStatuses,
   requestPairingCode,
+  getLinkBlockReason,
+  releaseTermsHoldForUser,
+  syncTermsHoldFromDb,
 };

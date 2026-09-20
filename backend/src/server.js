@@ -18,6 +18,7 @@ const adminRoutes = require('./routes/admin.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 const billing = require('./services/billing');
 const { startUploadsJanitor } = require('./services/uploadsJanitor');
+const trialPhoneGuard = require('./services/trialPhoneGuard');
 
 const app = express();
 const server = http.createServer(app);
@@ -101,9 +102,13 @@ io.on('connection', (socket) => {
 botManager.init(io);
 botManager.restoreActiveSessions();
 baileysManager.init(io);
-baileysManager.restoreActiveSessions();
+baileysManager
+  .syncTermsHoldFromDb()
+  .catch((err) => console.error('[terms] sync:', err.message))
+  .finally(() => baileysManager.restoreActiveSessions());
 billing.startBillingJob();
 startUploadsJanitor();
+trialPhoneGuard.seedFromExistingBots().catch((err) => console.error('[trial-phone] seed:', err.message));
 
 const PORT = process.env.PORT || 5010;
 const publicBase = (process.env.PUBLIC_BASE_URL || process.env.FRONTEND_URL || `http://localhost:${PORT}`).replace(/\/$/, '');

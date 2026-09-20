@@ -1,4 +1,6 @@
 const loginRateLimit = require('../services/loginRateLimit');
+const userTerms = require('../services/userTerms');
+const baileysManager = require('../services/baileysManager');
 
 exports.logout = (_req, res) => {
   // La session est gérée côté client (Supabase Auth).
@@ -7,6 +9,7 @@ exports.logout = (_req, res) => {
 
 exports.me = async (req, res) => {
   const u = req.user;
+  const terms = userTerms.publicTermsPayload(u);
   res.json({
     user: {
       id: u.id,
@@ -15,7 +18,28 @@ exports.me = async (req, res) => {
       avatar_url: u.avatar_url,
       role: u.role,
       exempt: u.exempt,
+      terms_accepted: terms.accepted,
+      terms_required: terms.required,
     },
+    terms,
+  });
+};
+
+exports.acceptTerms = async (req, res) => {
+  try {
+    const row = await userTerms.acceptTerms(req.user.id);
+    await baileysManager.releaseTermsHoldForUser(req.user.id);
+    const terms = userTerms.publicTermsPayload({ ...req.user, ...row });
+    res.json({ ok: true, terms });
+  } catch (err) {
+    console.error('acceptTerms:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getTerms = (_req, res) => {
+  res.json({
+    terms: userTerms.publicTermsPayload(null),
   });
 };
 

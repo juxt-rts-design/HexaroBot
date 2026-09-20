@@ -11,6 +11,7 @@ export default function QrModal({ botId, onClose, onConnected, onRetry }) {
   const [pairingCode, setPairingCode] = useState(null);
   const [pairingBusy, setPairingBusy] = useState(false);
   const [pairingError, setPairingError] = useState('');
+  const [linkError, setLinkError] = useState('');
   const [stuck, setStuck] = useState(false);
   const [socketOk, setSocketOk] = useState(false);
   const connectedRef = useRef(false);
@@ -22,6 +23,7 @@ export default function QrModal({ botId, onClose, onConnected, onRetry }) {
       setStuck(false);
     }
     if (snap.pairing?.code) setPairingCode(snap.pairing.code);
+    if (snap.link_error) setLinkError(snap.link_error);
     if (snap.status === 'connected') {
       setQr(null);
       setStatus('connected');
@@ -69,6 +71,15 @@ export default function QrModal({ botId, onClose, onConnected, onRetry }) {
       });
       socket.on('pairing-code', (payload) => {
         if (payload?.code) setPairingCode(payload.code);
+      });
+      socket.on('link-blocked', (payload) => {
+        if (payload?.error) setLinkError(payload.error);
+        setStatus('disconnected');
+        setQr(null);
+        setPairingCode(null);
+      });
+      socket.on('terms-required', () => {
+        onConnected?.();
       });
       socket.on('status', (payload) => {
         if (!payload?.status) return;
@@ -127,6 +138,11 @@ export default function QrModal({ botId, onClose, onConnected, onRetry }) {
           </p>
         ) : (
           <>
+            {linkError && (
+              <p className="pairing-error" style={{ margin: '12px 0', textAlign: 'left' }}>
+                {linkError}
+              </p>
+            )}
             {qr ? (
               <>
                 <img className="qr-image" src={qr} alt="QR code WhatsApp" />
@@ -150,6 +166,7 @@ export default function QrModal({ botId, onClose, onConnected, onRetry }) {
                 onClick={() => {
                   setStuck(false);
                   setPairingError('');
+                  setLinkError('');
                   onRetry?.();
                 }}
               >

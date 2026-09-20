@@ -224,6 +224,7 @@ exports.connectState = async (req, res) => {
     qr: live.qr,
     pairing: live.pairing,
     ready: live.ready,
+    link_error: live.link_error || null,
   });
 };
 

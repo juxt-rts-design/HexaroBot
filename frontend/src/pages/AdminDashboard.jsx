@@ -354,7 +354,7 @@ export default function AdminDashboard() {
             <h3 className="admin-subhead">Abonnements</h3>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Utilisateur</th><th>Offre</th><th>Essai</th><th>Fin d’accès</th><th>Statut</th><th></th></tr></thead>
+                <thead><tr><th>Utilisateur</th><th>Offre</th><th>Essai</th><th>Fin d’accès</th><th>Statut</th><th className="col-actions">Actions</th></tr></thead>
                 <tbody>
                   {subscriptions.map((s) => (
                     <tr key={s.id}>
@@ -363,37 +363,39 @@ export default function AdminDashboard() {
                       <td data-label="Essai">{s.is_trial ? 'Oui' : 'Non'}</td>
                       <td data-label="Fin d’accès">{s.ends_at ? new Date(s.ends_at).toLocaleDateString('fr-FR') : '—'}</td>
                       <td data-label="Statut"><span className={`badge ${s.status === 'active' ? 'connected' : 'qr_pending'}`}>{s.status}</span></td>
-                      <td data-label="" className="actions-cell">
-                        <div className="actions-inner admin-sub-actions">
+                      <td data-label="Actions" className="actions-cell">
+                        <div className="admin-sub-actions">
                         {s.status === 'pending_payment' && (
-                          <button className="btn" disabled={isBusy(`activate-${s.id}`)} onClick={() => activate(s.id)}>
+                          <button className="btn btn-sm" disabled={isBusy(`activate-${s.id}`)} onClick={() => activate(s.id)}>
                             {isBusy(`activate-${s.id}`) ? '...' : 'Activer 30 j'}
                           </button>
                         )}
-                        <label className="admin-extend-field">
-                          <span className="sr-only">Jours à ajouter</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={365}
-                            className="admin-extend-days"
-                            value={extendDays[s.id] ?? 30}
-                            onChange={(e) =>
-                              setExtendDays((prev) => ({ ...prev, [s.id]: e.target.value }))
-                            }
-                          />
-                          <span className="muted">j</span>
-                        </label>
-                        <button
-                          className="btn"
-                          disabled={isBusy(`extend-${s.id}`)}
-                          onClick={() => extendSubscription(s.id)}
-                          title="Prolonger sans paiement"
-                        >
-                          {isBusy(`extend-${s.id}`) ? '...' : 'Prolonger'}
-                        </button>
-                        <button className="btn secondary" disabled={isBusy(`sub-del-${s.id}`)} onClick={() => deleteSubscription(s.id)}>
-                          {isBusy(`sub-del-${s.id}`) ? '...' : 'Supprimer'}
+                        <div className="admin-extend-row">
+                          <label className="admin-extend-field">
+                            <span className="sr-only">Jours à ajouter</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={365}
+                              className="admin-extend-days"
+                              value={extendDays[s.id] ?? 30}
+                              onChange={(e) =>
+                                setExtendDays((prev) => ({ ...prev, [s.id]: e.target.value }))
+                              }
+                            />
+                            <span className="admin-extend-suffix">j</span>
+                          </label>
+                          <button
+                            className="btn btn-sm"
+                            disabled={isBusy(`extend-${s.id}`)}
+                            onClick={() => extendSubscription(s.id)}
+                            title="Prolonger sans paiement"
+                          >
+                            {isBusy(`extend-${s.id}`) ? '...' : 'Prolonger'}
+                          </button>
+                        </div>
+                        <button className="btn secondary btn-sm" disabled={isBusy(`sub-del-${s.id}`)} onClick={() => deleteSubscription(s.id)}>
+                          {isBusy(`sub-del-${s.id}`) ? '...' : 'Suppr.'}
                         </button>
                         </div>
                       </td>

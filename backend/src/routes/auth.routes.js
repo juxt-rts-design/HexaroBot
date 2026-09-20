@@ -4,6 +4,8 @@ const { requireAuth } = require('../middleware/auth');
 
 router.post('/logout', ctrl.logout);
 router.get('/me', requireAuth, ctrl.me);
+router.get('/terms', ctrl.getTerms);
+router.post('/accept-terms', requireAuth, ctrl.acceptTerms);
 router.post('/login-guard', ctrl.loginGuard);
 router.post('/login-fail', ctrl.loginFail);
 router.post('/login-ok', ctrl.loginOk);

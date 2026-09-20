@@ -9,7 +9,8 @@ function bearerToken(req) {
   return null;
 }
 
-const PROFILE_FIELDS = 'id, email, name, avatar_url, role, exempt, blocked';
+const PROFILE_FIELDS = 'id, email, name, avatar_url, role, exempt, blocked, terms_accepted_at, terms_version';
+const PROFILE_FIELDS_LEGACY = 'id, email, name, avatar_url, role, exempt, blocked';
 
 function adminEmail() {
   return (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
@@ -26,8 +27,17 @@ async function loadProfile(userId) {
     .select(PROFILE_FIELDS)
     .eq('id', userId)
     .maybeSingle();
-  if (error) throw error;
-  return data;
+  if (!error) return data;
+  if (/terms_accepted_at|terms_version/.test(error.message || '')) {
+    const retry = await supabase
+      .from('profiles')
+      .select(PROFILE_FIELDS_LEGACY)
+      .eq('id', userId)
+      .maybeSingle();
+    if (retry.error) throw retry.error;
+    return retry.data;
+  }
+  throw error;
 }
 
 /** Crée le profil si le compte Auth existe déjà sans ligne (inscription avant le trigger, etc.). */
@@ -46,22 +56,20 @@ async function ensureProfile(authUser) {
     if (!profile.avatar_url && avatarUrl) patch.avatar_url = avatarUrl;
     if (desiredRole === 'admin' && profile.role !== 'admin') patch.role = 'admin';
     if (Object.keys(patch).length) {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('profiles')
         .update(patch)
-        .eq('id', authUser.id)
-        .select(PROFILE_FIELDS)
-        .single();
+        .eq('id', authUser.id);
       if (error) {
         console.error('ensureProfile update:', error.message, error);
-      } else if (data) {
-        profile = data;
+      } else {
+        profile = (await loadProfile(authUser.id)) || { ...profile, ...patch };
       }
     }
     return profile;
   }
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('profiles')
     .upsert(
       {
@@ -72,11 +80,9 @@ async function ensureProfile(authUser) {
         role: desiredRole,
       },
       { onConflict: 'id' }
-    )
-    .select(PROFILE_FIELDS)
-    .single();
+    );
   if (error) throw error;
-  return data;
+  return loadProfile(authUser.id);
 }
 
 exports.requireAuth = async (req, res, next) => {

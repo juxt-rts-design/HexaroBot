@@ -9,6 +9,7 @@ import { BrandMark, Icon } from '../components/Icons';
 import { useBotStatusWatcher } from '../hooks/useBotStatusWatcher';
 import { useToast } from '../context/ToastContext';
 import ConfirmModal from '../components/ConfirmModal';
+import TermsModal from '../components/TermsModal';
 import AdminWhatsAppLink from '../components/AdminWhatsAppLink';
 import { displayBotLabel, displayPlanDescription, displayPlanName } from '../utils/botDisplay';
 
@@ -35,7 +36,7 @@ function accessLine(sub, exempt) {
 }
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshProfile } = useAuth();
   const { run, isBusy } = useBusy();
   const { push } = useToast();
   const [params, setParams] = useSearchParams();
@@ -47,6 +48,7 @@ export default function Dashboard() {
   const [payBotId, setPayBotId] = useState(null);
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState(null);
+  const [termsOpen, setTermsOpen] = useState(false);
   const autoPayRef = useRef(false);
 
   useBotStatusWatcher(bots, {
@@ -79,6 +81,15 @@ export default function Dashboard() {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    if (!user || user.exempt || user.terms_accepted) {
+      setTermsOpen(false);
+      return;
+    }
+    const linked = bots.some((b) => b.status === 'connected' || Boolean(b.phone_number));
+    setTermsOpen(linked);
+  }, [user, bots]);
 
   useEffect(() => {
     if (params.get('pay') !== '1') return;
@@ -355,7 +366,11 @@ export default function Dashboard() {
             setQrBotId(null);
             refresh();
           }}
-          onConnected={refresh}
+          onConnected={async () => {
+            setQrBotId(null);
+            await refresh();
+            await refreshProfile().catch(() => {});
+          }}
           onRetry={() => reconnectBot(qrBotId, { fresh: true })}
         />
       )}
@@ -381,6 +396,18 @@ export default function Dashboard() {
             duration: 7000,
           });
           refresh();
+        }}
+      />
+      <TermsModal
+        open={termsOpen}
+        onAccepted={async () => {
+          await refreshProfile();
+          setTermsOpen(false);
+          push({
+            title: 'Conditions acceptées',
+            message: 'HexaroBot peut maintenant traiter tes messages.',
+            tone: 'success',
+          });
         }}
       />
       <ConfirmModal

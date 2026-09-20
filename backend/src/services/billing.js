@@ -233,7 +233,7 @@ async function suspendBot(bot) {
     .eq('id', bot.subscription_id);
 }
 
-async function resumeBotAfterPayment(bot, endsAtIso) {
+async function resumeBotAfterPayment(bot, endsAtIso, { restartDown = true } = {}) {
   await supabase
     .from('subscriptions')
     .update({
@@ -245,8 +245,15 @@ async function resumeBotAfterPayment(bot, endsAtIso) {
     })
     .eq('id', bot.subscription_id);
 
+  if (!restartDown) return;
+  const manager = managerFor(bot.plan_code);
+  if (typeof manager.isLiveConnected === 'function' && manager.isLiveConnected(bot.id)) {
+    return;
+  }
+  if (bot.status === 'qr_pending' || bot.status === 'created') return;
+
   try {
-    await managerFor(bot.plan_code).startBot({
+    await manager.startBot({
       botId: bot.id,
       sessionKey: bot.session_key,
       planCode: bot.plan_code,
@@ -287,7 +294,8 @@ async function extendSubscriptionDays(subscriptionId, days, { reason = 'payment'
   const { data: bots } = await supabase.from('bots').select('*').eq('subscription_id', subscriptionId);
   if (bots?.length) {
     for (const bot of bots) {
-      await resumeBotAfterPayment(bot, endsAt);
+      const restartDown = reason === 'payment' || bot.status === 'suspended';
+      await resumeBotAfterPayment(bot, endsAt, { restartDown });
       if (reason === 'payment') {
         setTimeout(() => {
           notifyBot(

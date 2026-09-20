@@ -3,6 +3,9 @@ const path = require('path');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const { supabase } = require('../config/supabase');
+const trialPhoneGuard = require('./trialPhoneGuard');
+
+const lastLinkBlock = new Map();
 
 const SESSIONS_DIR = path.join(__dirname, '..', '..', 'sessions');
 
@@ -90,6 +93,14 @@ async function startBot({ botId, sessionKey, planCode, force = false }) {
   client.on('ready', async () => {
     lastQr.delete(botId);
     const phone = client.info?.wid?.user || null;
+    const link = await trialPhoneGuard.assertLinkAllowed(botId, phone);
+    if (!link.allowed) {
+      lastLinkBlock.set(botId, link.message);
+      emit(botId, 'link-blocked', { error: link.message });
+      await disconnectBot(botId, sessionKey);
+      return;
+    }
+    lastLinkBlock.delete(botId);
     await setStatus(botId, 'connected', { phone_number: phone });
   });
 
